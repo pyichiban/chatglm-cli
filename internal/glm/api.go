@@ -11,17 +11,16 @@ var CIDPattern = regexp.MustCompile(`^[0-9a-f]{24}$`)
 
 // ChatOpt 是一次对话的参数。零值 = 与网页版默认行为一致。
 type ChatOpt struct {
-	Agent       string // assistant_id，空 = 主对话
-	CID         string // conversation_id，空 = 首轮（服务端懒创建会话）
-	Prompt      string // 只带当前这一条消息：多轮上下文由服务端按 CID 维护 [实证 PROTOCOL §3.6]
-	Model       string
-	Mode        string // chat_mode：普通/思考/沉思…，值原样透传
-	Effort      string // reasoning_effort（""/thinking/deep_thinking 与 low/high/max 两套写法，见 README）
-	Web         bool   // is_networking
-	Ratio       string // 生图 aspect_ratio；给了就按生图（cogview）
-	Style       string
-	Scene       string
-	RMWatermark bool // cogview.rm_label_watermark
+	Agent  string // assistant_id，空 = 主对话
+	CID    string // conversation_id，空 = 首轮（服务端懒创建会话）
+	Prompt string // 只带当前这一条消息：多轮上下文由服务端按 CID 维护 [实证 PROTOCOL §3.6]
+	Model  string
+	Mode   string // chat_mode：普通/思考/沉思…，值原样透传
+	Effort string // reasoning_effort（""/thinking/deep_thinking 与 low/high/max 两套写法，见 README）
+	Web    bool   // is_networking
+	Ratio  string // 生图 aspect_ratio；给了就按生图（cogview）
+	Style  string
+	Scene  string
 }
 
 // ChatBody 构造 /assistant/stream 请求体（字段对齐抓包 sid 356/480/781）。
@@ -34,7 +33,7 @@ func ChatBody(o ChatOpt) map[string]any {
 	if model == "" {
 		model = DEFAULT_MODEL
 	}
-	cogview := map[string]any{"rm_label_watermark": o.RMWatermark}
+	cogview := map[string]any{"rm_label_watermark": true} // 写死去水印：实证 false 产物带「清言·AI生成」角标（用户要求永远去水印）
 	if o.Ratio != "" {
 		cogview["aspect_ratio"] = o.Ratio // 非法值上游会静默降级 1:1（docs/生图协议与实操.md §2.3）
 	}
@@ -148,8 +147,9 @@ func (c *Client) UpdateStatus(mid string) (json.RawMessage, error) {
 }
 
 // EditBody 构造 image/reference 请求体（智能编辑）。
-// ⚠️ image_url 必须是上游服务器能拉到的公网 URL；输出比例跟随输入图，ratio 仅透传。
-func EditBody(imageURL, prompt, title, ratio string, rmWatermark bool) map[string]any {
+// ⚠️ image_url 必须是上游服务器能拉到的公网 URL；输出比例跟随输入图，ratio 仅透传；
+// rm_label_watermark 写死 true（实证 false 产物带角标，用户要求永远去水印）。
+func EditBody(imageURL, prompt, title, ratio string) map[string]any {
 	if ratio == "" {
 		ratio = "1:1"
 	}
@@ -165,13 +165,13 @@ func EditBody(imageURL, prompt, title, ratio string, rmWatermark bool) map[strin
 		"category": 1, "conversation_id": "", "history_id": "",
 		"assistant_id": ASSISTANT_DRAWING, "prompt": prompt,
 		"if_plus_model": false, "title": title,
-		"aspect_ratio": ratio, "rm_label_watermark": rmWatermark,
+		"aspect_ratio": ratio, "rm_label_watermark": true,
 	}
 }
 
 // EditImage 参考图生图：同步长请求（17~22s），返回 result 原样
 // （{image_url, conversation_id}）。
-func (c *Client) EditImage(imageURL, prompt, title, ratio string, rmWatermark bool) (json.RawMessage, error) {
+func (c *Client) EditImage(imageURL, prompt, title, ratio string) (json.RawMessage, error) {
 	return c.Do(http.MethodPost, EP_IMAGE_REFERENCE, nil,
-		EditBody(imageURL, prompt, title, ratio, rmWatermark))
+		EditBody(imageURL, prompt, title, ratio))
 }

@@ -33,19 +33,18 @@ type Flags struct {
 	Timeout                 int
 	DryRun, Debug, Insecure bool
 
-	Prompt      string
-	CID         string
-	Agent       string
-	Model       string
-	Mode        string
-	Effort      string
-	Web         bool
-	Ratio       string
-	Style       string
-	Scene       string
-	Title       string
-	TitleFile   string
-	RMWatermark bool
+	Prompt    string
+	CID       string
+	Agent     string
+	Model     string
+	Mode      string
+	Effort    string
+	Web       bool
+	Ratio     string
+	Style     string
+	Scene     string
+	Title     string
+	TitleFile string
 
 	// image：一键生图
 	Refs listValue
@@ -84,7 +83,6 @@ func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.Scene, "scene", "", "生图场景（实测已失效，仅透传）")
 	fs.StringVar(&f.Title, "title", "", "会话标题：chat 给新会话改名；conv rename 的新标题")
 	fs.StringVar(&f.TitleFile, "title-file", "", "从文件读标题（避开 shell 引号）")
-	fs.BoolVar(&f.RMWatermark, "rm-watermark", false, "cogview.rm_label_watermark（是否真去水印 [未知]）")
 	fs.Var(&f.Refs, "ref", "参考图路径（image 命令，可重复；也可用位置参数）")
 	fs.StringVar(&f.Out, "out", "", "生成图保存位置：目录或 .jpg 文件路径（image 命令；默认当前目录按时间戳命名）")
 
@@ -362,8 +360,7 @@ func runChat(a *App) error {
 		return glm.NewErr(glm.CUsage, "--ratio %q 不在实测有效集合（上游会静默降级为 1:1）: 1:1|3:4|4:3|9:16|16:9", f.Ratio)
 	}
 	opt := glm.ChatOpt{Agent: agent, CID: f.CID, Prompt: prompt, Model: f.Model, Mode: f.Mode,
-		Effort: f.Effort, Web: f.Web, Ratio: f.Ratio, Style: f.Style, Scene: f.Scene,
-		RMWatermark: f.RMWatermark}
+		Effort: f.Effort, Web: f.Web, Ratio: f.Ratio, Style: f.Style, Scene: f.Scene}
 	if a.dryCall("chat", "POST", glm.EP_CHAT, glm.ChatBody(opt)) {
 		return nil
 	}

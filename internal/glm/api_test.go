@@ -38,8 +38,8 @@ func TestChatBodyMatchesCapture(t *testing.T) {
 	if _, ok := cw["aspect_ratio"]; ok {
 		t.Errorf("普通对话不该带 aspect_ratio（只有生图请求才有）")
 	}
-	if cw["rm_label_watermark"] != false {
-		t.Errorf("普通对话 cogview = %v", cw)
+	if cw["rm_label_watermark"] != true {
+		t.Errorf("cogview.rm_label_watermark 应写死 true（实证 false 产物带角标，用户要求永远去水印）: %v", cw)
 	}
 }
 

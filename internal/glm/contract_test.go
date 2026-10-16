@@ -952,7 +952,7 @@ func TestContractEditShape(t *testing.T) {
 	}))
 	defer srv.Close()
 	cl := newTestClient(t, srv.URL)
-	raw, err := cl.EditImage("https://host/ref.jpg", "把背景改成夜空", "", "1:1", true)
+	raw, err := cl.EditImage("https://host/ref.jpg", "把背景改成夜空", "", "1:1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -974,7 +974,7 @@ func TestContractEditShape(t *testing.T) {
 	if json.Unmarshal(raw, &res) != nil || res.ImageURL == "" || len(res.ConversationID) != 24 {
 		t.Errorf("result 解析错: %s", raw)
 	}
-	b := EditBody("u", "把背景改成夜空", "", "", true)
+	b := EditBody("u", "把背景改成夜空", "", "")
 	if !strings.HasPrefix(b["title"].(string), "【智能编辑】 ") {
 		t.Errorf("title 缺省前缀错: %v", b["title"])
 	}
@@ -993,12 +993,18 @@ func TestContractImagePipeline(t *testing.T) {
 			RefsCompo struct {
 				BudgetPixels int    `json:"budget_pixels"`
 				Format       string `json:"format"`
+				Outline      string `json:"outline"`
+				Layout       string `json:"layout"`
 			} `json:"refs_composite"`
 			Upload struct {
 				Primary  string `json:"primary"`
 				Fallback string `json:"fallback"`
 				Body     string `json:"body"`
 			} `json:"upload"`
+			RmWatermark struct {
+				Hardcoded bool   `json:"hardcoded"`
+				Evidence  string `json:"evidence"`
+			} `json:"rm_label_watermark"`
 		} `json:"image_pipeline"`
 	}
 	if json.Unmarshal(raw, &full) != nil {
@@ -1008,8 +1014,13 @@ func TestContractImagePipeline(t *testing.T) {
 	if p.Command != "image" || !p.Blocking {
 		t.Errorf("image_pipeline.command/blocking 错: %+v", p)
 	}
-	if p.RefsCompo.BudgetPixels != 4800000 || p.RefsCompo.Format != "jpeg" {
-		t.Errorf("拼版预算与实现不一致: %+v", p.RefsCompo)
+	if p.RefsCompo.BudgetPixels != 4800000 || p.RefsCompo.Format != "jpeg" ||
+		!strings.Contains(p.RefsCompo.Outline, "方形") ||
+		!strings.Contains(p.RefsCompo.Layout, "内容像素最大化") {
+		t.Errorf("拼版契约与实现不一致: %+v", p.RefsCompo)
+	}
+	if !p.RmWatermark.Hardcoded || !strings.Contains(p.RmWatermark.Evidence, "实证") {
+		t.Errorf("水印默认值契约错: %+v", p.RmWatermark)
 	}
 	if !strings.Contains(p.Upload.Primary, "meitu") || !strings.Contains(p.Upload.Fallback, "icve") ||
 		!strings.Contains(p.Upload.Body, "raw binary") {

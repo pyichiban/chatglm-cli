@@ -37,7 +37,7 @@ func runImage(a *App) error {
 
 	if len(refs) == 0 { // ── 文生图：与 chat --agent drawing 同源 ──
 		opt := glm.ChatOpt{Agent: glm.ASSISTANT_DRAWING, Prompt: prompt, Model: f.Model,
-			Web: f.Web, Ratio: orDefault(f.Ratio, "1:1"), RMWatermark: f.RMWatermark}
+			Web: f.Web, Ratio: orDefault(f.Ratio, "1:1")}
 		if a.dryCall("image", "POST", glm.EP_CHAT, glm.ChatBody(opt)) {
 			return nil
 		}
@@ -70,7 +70,7 @@ func runImage(a *App) error {
 	if a.dryRun {
 		a.result("dry-run", map[string]any{"cmd": "image", "refs": refs,
 			"steps": []string{"composite", "upload", "submit", "download"},
-			"body":  glm.EditBody("<上传后直链>", prompt, "", f.Ratio, f.RMWatermark)})
+			"body":  glm.EditBody("<上传后直链>", prompt, "", f.Ratio)})
 		return nil
 	}
 
@@ -91,7 +91,7 @@ func runImage(a *App) error {
 	a.step("upload.done", map[string]any{"url": url, "host": host})
 
 	// 3) 智能编辑（同步长请求 17~22s）
-	raw, err := a.c.EditImage(url, prompt, "", f.Ratio, f.RMWatermark)
+	raw, err := a.c.EditImage(url, prompt, "", f.Ratio)
 	if err != nil {
 		return err
 	}

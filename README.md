@@ -90,7 +90,6 @@ conv read       MESSAGE_ID                          标记已读
 | `--ratio` | 生图比例 `1:1\|3:4\|4:3\|9:16\|16:9`；给了它就自动切 `drawing` agent |
 | `--title` | 新会话首轮答完顺手改名（「增 + 改」一次做完） |
 | `--style` / `--scene` | 生图风格/场景，**实测已失效**，仅透传 |
-| `--rm-watermark` | `cogview.rm_label_watermark`（是否真去水印 [未知]） |
 
 全局 flag：`--cred --base --timeout --dry-run -v --insecure`；`--version`/`-V` 可放任意位置。不支持代理（IDE 通道直连）。
 `--timeout` **只作用于非流式请求**（含凭据刷新）；对话流刻意不设任何超时（带超时会把长回答掐断且没有终止帧）。
@@ -131,14 +130,18 @@ glm2cli image --out out.jpg \
 
 内部流程（每步都有 item 进度事件）：
 
-1. **拼版**（仅当有参考图）：所有参考图等比例缩入网格，每张外围画红圈、下方标注
-   `reference1..N`，最终 JPEG 面积 ≤480w 像素（上游 500w 硬约束留余量）；
+1. **拼版**（仅当有参考图）：**justified-rows 填充算法** —— 按输入图宽高比贪心分行、行内等高、
+   二分+阶梯搜索最大化内容像素（目标 ≤480w，上游 500w 硬约束留余量；单图放大上限 4 倍，
+   超限时该行独立鍳高、不拖累其它图）；每张参考图外围画**方形外框**（画在图像外侧，不遮像素）、
+   下方标注条 `reference1..N`；
 2. **上传图床**：file.sang.pub `meitu` 通道（落地 meitudata.com 大陆 CDN），失败自动回退
    `icve` 通道；raw binary body（multipart 会被存成信封，勿改）；
-3. **智能编辑**：`POST drawing-api/v1/image/reference`（17~22s 同步；单图接口；输出比例跟随输入图）；
+3. **智能编辑**：`POST drawing-api/v1/image/reference`（17~22s 同步；单图接口；输出比例跟随输入图；
+   **`rm_label_watermark` 写死 true** —— 实证 false 产物带「清言·AI生成」角标，永不产带水印图）；
 4. **下载保存**：`--out` 为目录或 `.jpg` 文件路径，默认当前目录按时间戳命名；非 JPEG/PNG 直接报错。
 
-> 提示词里用 `reference1`/`reference2` 指代对应参考图；两个服务都是免费匿名第三方，参考图勿含敏感内容。
+> 提示词里用 `reference1`/`reference2` 指代对应参考图；**要明确“只画哪张/画哪几张”**，
+> 否则模型可能照搬拼版的左右布局。两个服务都是免费匿名第三方，参考图勿含敏感内容。
 
 **agent（无 TTY、只靠契约与退出码）**
 

@@ -63,7 +63,7 @@ glm2cli help [conv|version]        用法
 会话子命令：
 
 ```
-conv list                [--agent main|drawing] [--grep 关键词]     完整列表（内部自动翻页）
+conv list                [--agent ID|别名] [--grep 关键词]     全部智能体的完整列表（内部自动翻页，默认不过滤）
 conv show       CID                                 元数据 + 自动标题
 conv history    CID      [--agent A] [--raw]        逐条输出 user/text/reasoning/images
 conv rename     CID TITLE|--title T|--title-file P   改标题

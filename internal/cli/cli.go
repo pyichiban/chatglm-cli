@@ -70,7 +70,7 @@ func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.Prompt, "p", "", "提示词；'-' 表示从 stdin 读")
 	fs.StringVar(&f.Prompt, "prompt", "", "")
 	fs.StringVar(&f.CID, "cid", "", "conversation_id（24 位小写 hex）；省略=新会话。必须显式传入")
-	fs.StringVar(&f.Agent, "agent", "main", "main|drawing|read|video|study 或裸 assistant_id")
+	fs.StringVar(&f.Agent, "agent", "", "别名 main|drawing|read|video|study 或裸 assistant_id；缺省：chat=主对话，conv list/show/delete=不过滤或 main")
 	fs.StringVar(&f.Model, "model", glm.DEFAULT_MODEL, "selected_model")
 	fs.StringVar(&f.Mode, "mode", "", "chat_mode 原样透传（实测抓包为 thinking）")
 	fs.StringVar(&f.Effort, "effort", "", "reasoning_effort 原样透传（深度 thinking / 极致 deep_thinking）")
@@ -335,6 +335,9 @@ func runChat(a *App) error {
 	agent, err := resolveAgent(f.Agent, f.Ratio)
 	if err != nil {
 		return err
+	}
+	if agent == "" {
+		agent = glm.DEFAULT_ASSISTANT // chat 场景缺省主对话（meta 事件要回显真实 agent_id）
 	}
 	if f.CID != "" && !glm.CIDPattern.MatchString(f.CID) {
 		return glm.NewErr(glm.CUsage, "--cid 必须是 24 位小写 hex（上游 conversation_id），收到 %q", f.CID)

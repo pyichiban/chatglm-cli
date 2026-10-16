@@ -11,7 +11,7 @@ import (
 
 // convUsage 同时用于 help 与 schema，避免两处漂移。
 const convUsage = `conv 子命令（会话增删改查；「增」由 chat 不带 --cid 时服务端懒创建完成）:
-  list                [--agent main|drawing] [--grep 关键词]     完整列表（内部自动翻页）
+  list                [--agent ID|别名] [--grep 关键词]          完整列表（内部翻页；默认全部智能体）
   show       CID                                   元数据 + 上游自动标题
   history    CID      [--agent A] [--raw]           逐条输出 user/text/reasoning/images
   rename     CID TITLE|--title T|--title-file P     改标题

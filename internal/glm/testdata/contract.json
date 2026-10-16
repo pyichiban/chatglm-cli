@@ -1,0 +1,252 @@
+{
+  "contract_version": 1,
+  "updated": "2026-10-16",
+  "note": "跨语言契约基准。Python(chatglm2api) 与 Go(chatglm-cli) 两套独立实现各自断言本文件；\nfixtures 段的期望值由「另一套实现 + 真实抓包帧」反推，防止同源污染。\nknown_divergences 显式记录两边当前不一致之处（各自断言自己的那一项，改动即失败 ⇒ 逼迫更新契约）。",
+
+  "channel": {
+    "name": "ide",
+    "app_name": "chatglm",
+    "app_platform": "win",
+    "app_version": "2.0.6",
+    "app_fr": "default",
+    "sec_ch_ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\"",
+    "ua_markers": ["Electron/", "Platform/ChatGLM_Win", "DeviceId/", "AppVersion/2.0.6"],
+    "referer__991_required": false,
+    "header_names": ["Accept", "Accept-Encoding", "Accept-Language", "App-Name", "Authorization",
+      "Origin", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site", "User-Agent",
+      "X-App-Platform", "X-App-Version", "X-App-fr", "X-Device-Brand", "X-Device-Model",
+      "X-Exp-Groups", "X-Lang", "X-Nonce", "X-Sign", "X-Timestamp",
+      "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"],
+    "per_request_extra_headers": ["X-Device-Id", "X-Request-Id"],
+    "never_headers": ["Cookie"]
+  },
+
+  "sign": {
+    "secret": "8a1317a7468aa3ad86e997d08f3f31cb",
+    "formula": "md5(ts + '-' + nonce + '-' + secret) 小写 hex",
+    "nonce_len": 32,
+    "ts_len": 13,
+    "vector": {"ts": "1790732179905", "nonce": "75988225830f4d93b6702dcd0a2e9baf",
+               "sign": "a32ee7a2876ad44e6658475f0a7c69eb"}
+  },
+
+  "endpoints": {
+    "refresh": "/chatglm/user-api/user/refresh",
+    "user_info": "/chatglm/user-api/user/info",
+    "models": "/chatglm/agent-api/operation/detail",
+    "conv_list": "/chatglm/mainchat-api/conversation/recent_list",
+    "chat": "/chatglm/backend-api/assistant/stream",
+    "history": "/chatglm/mainchat-api/conversation/messages",
+    "history_v2_dead": "/chatglm/agent-api/conversation/page_messages_v2",
+    "bulk_delete": "/chatglm/mainchat-api/conversation/bulk_delete",
+    "modify_title": "/chatglm/mainchat-api/conversation/modify_title",
+    "conv_title": "/chatglm/mainchat-api/conversation/title",
+    "update_status": "/chatglm/mainchat-api/stream/update_status",
+    "stop_stream": "/chatglm/mainchat-api/stream/stop_stream",
+    "image_reference": "/chatglm/drawing-api/v1/image/reference"
+  },
+
+  "agents": {
+    "main": "65940acff94777010aa6b796",
+    "drawing": "65a232c082ff90a2ad2f15e2",
+    "read": "658a7988b8a9a98d38725745",
+    "video": "668d03b2e99d661ed3c32516",
+    "study": "68f0b8c110eea3e78b0e0e5e"
+  },
+
+  "defaults": {
+    "base": "https://chatglm.cn",
+    "model": "glm-5.3-flash",
+    "chat_type": "user_chat",
+    "page_size": 20,
+    "history_page_size_v2": 30,
+    "meta_platform": "pc",
+    "left_score_unit": "分（100 分 = 1 积分）",
+    "cid_pattern": "^[0-9a-f]{24}$"
+  },
+
+  "codes": { "transient": 40012, "auth": [40102, 40103] },
+
+  "timeouts": {
+    "connect_sec": 15, "read_sec": 60, "auth_skew_sec": 300,
+    "stream_total_timeout": null,
+    "rule": "流式请求不得设任何总超时；截断必须报错，不得伪造收尾帧"
+  },
+
+  "env": {
+    "refresh_token": "GLM_REFRESH_TOKEN", "access_token": "GLM_ACCESS_TOKEN",
+    "device_id": "GLM_DEVICE_ID", "user_id": "GLM_USER_ID", "cookie": "GLM_COOKIE",
+    "credential_file": "GLM_CREDENTIAL_FILE"
+  },
+
+  "cookies": {
+    "business": ["chatglm_token", "chatglm_refresh_token", "chatglm_user_id"],
+    "waf_drop_keys": ["acw_tc", "cdn_sec_tc", "chatglm_token_expires", "_c_WBKFRo", "_nb_ioWEgULi"],
+    "waf_drop_prefix": ["ssxmod", "_c_", "_nb_"]
+  },
+
+  "credential_file": {
+    "keys": ["refresh_token", "access_token", "device_id", "user_id", "extra_cookies"],
+    "write": "tmp + rename 原子替换",
+    "must_persist_after_refresh": true
+  },
+
+  "chat_body": {
+    "top_keys": ["assistant_id", "conversation_id", "project_id", "chat_type", "meta_data", "messages"],
+    "meta_keys": ["channel", "chat_mode", "cogview", "draft_id", "input_question_type", "is_networking",
+                  "is_test", "platform", "quote_log_id", "selected_model"],
+    "cogview_base_keys": ["rm_label_watermark"],
+    "cogview_drawing_keys": ["aspect_ratio", "style", "scene"],
+    "messages_len": 1,
+    "first_turn_conversation_id": "",
+    "reasoning_effort_optional": true
+  },
+
+  "request_shapes": {
+    "history": {"method": "GET", "endpoint": "history", "query": ["assistant_id", "conversation_id"],
+                "pagination_params": [], "note": "升序全量返回，page_size/page 实测被忽略"},
+    "history_v2": {"method": "GET", "endpoint": "history_v2_dead",
+                   "query": ["assistant_id", "conversation_id", "page_size"]},
+    "conv_list": {"method": "POST", "endpoint": "conv_list", "body_keys": ["page", "page_size"]},
+    "rename": {"method": "POST", "endpoint": "modify_title", "body_keys": ["conversation_id", "title"]},
+    "conv_title": {"method": "GET", "endpoint": "conv_title", "query": ["conversation_id"]},
+    "bulk_delete": {"method": "POST", "endpoint": "bulk_delete",
+                    "body_keys": ["assistant_id", "conversation_ids"],
+                    "note": "assistant_id 不匹配则上游静默无效（返回成功但没删）"},
+    "stop_stream": {"method": "POST", "endpoint": "stop_stream", "body_keys": ["history_id"]},
+    "update_status": {"method": "POST", "endpoint": "update_status", "body_keys": ["history_id"]},
+    "refresh": {"method": "POST", "endpoint": "refresh", "body": {},
+                "auth_token": "refresh_token", "rotates_refresh_token": "sometimes"}
+  },
+
+  "sse_rules": {
+    "done_sentinel": false,
+    "finish_marker": "顶层 status==\"finish\"",
+    "part_status": {"init": "增量 delta", "finish": "该段权威全文"},
+    "part_key_precedence": ["logic_id", "id", "#index"],
+    "content_text_types": ["text", "code", "execution_output"],
+    "content_think_types": ["think", "tool_result", "quote_result"],
+    "content_image_type": "image",
+    "noise_line": "生图流末尾有一行不带 data: 前缀的裸 JSON 信封 {\"status\":0,...,\"rid\":...}，必须忽略",
+    "truncation": "未见 finish/error 即 EOF ⇒ 报 stream_truncated，禁止补结束帧",
+    "usage_fields": null
+  },
+
+  "python_result_keys": ["conversation_id", "history_id", "text", "thinking", "parts",
+                         "finished", "error", "frames"],
+
+  "cli_event_contract": {
+    "version": 1,
+    "types": ["meta", "text", "reasoning", "image", "item", "result", "done", "warn", "error"],
+    "first_event": "meta",
+    "last_event": "done | error（二者互斥）",
+    "fields": {
+      "meta": ["v", "type", "request_id", "conversation_id", "message_id", "agent_id", "model", "new", "cmd", "ts"],
+      "text": ["v", "type", "request_id", "part", "delta"],
+      "reasoning": ["v", "type", "request_id", "part", "delta"],
+      "image": ["v", "type", "request_id", "part", "url", "polished_prompt", "index"],
+      "done": ["v", "type", "request_id", "conversation_id", "message_id", "agent_id", "model",
+               "cmd", "new", "frames", "elapsed_ms", "finished", "images", "text_chars", "reasoning_chars"],
+      "error": ["v", "type", "code", "message", "detail", "retryable", "http_status", "biz_status", "request_id"]
+    }
+  },
+
+  "exit_codes": {
+    "ok": 0, "upstream_error": 1, "usage_error": 2, "auth_error": 3,
+    "transient_rejection": 4, "stream_truncated": 5, "rate_limited": 6, "not_proven": 7
+  },
+
+  "fixtures": {
+    "sha256": {
+      "stream_first.txt": "b4057878b8dacf6395b6d84d04aed70c879cf31a91b20a2e84c3cdc7b83879bb",
+      "stream_error.txt": "a296ef50fc5ca54ede9644e53cb12f64e075542e687d3fe88cc4988e0f4d2f95",
+      "stream_drawing.txt": "ca11a48afed4f5262d42e9d48b8fd89a714d3df2e35326bbb460aa5e29755e16",
+      "history.json": "f4341246111506def30e13a5f9c94e62412723ebfc79879f815e43068f65587b"
+    },
+    "stream_first.txt": {
+      "conversation_id": "6abbaf3a430b0bf06c7b6b1a", "history_id": "6abbaf3a430b0bf06c7b6b1b",
+      "frames": 4, "finished": true, "error_code": null, "truncated": null,
+      "text_len": 94, "text_sha": "01c24b1be3a9bcec",
+      "text_head": "你好呀！很高兴见到你。我是智谱清言（Z.ai训练",
+      "reasoning_len": 265, "reasoning_sha": "0daff6a0f6b5a1b0",
+      "image_count": 0, "image_url_head": "", "image_sha": "",
+      "point": "短回答只有 finish 帧、没有任何 init 增量 ⇒ 只发 init 会把正文整个丢掉"
+    },
+    "stream_error.txt": {
+      "conversation_id": "6abbaf3a430b0bf06c7b6b1a", "history_id": "6abbaf5052cdcda034ceb485",
+      "frames": 94, "finished": false, "error_code": 10024, "truncated": null,
+      "text_len": 1607, "text_sha": "a2834d8a30ba3a9c",
+      "text_head": "X射线是一种波长极短、频率极高、能量很大的电磁波",
+      "reasoning_len": 72, "reasoning_sha": "02734b1d34ccacc0",
+      "image_count": 0, "image_url_head": "", "image_sha": "",
+      "point": "被 abort 的流：顶层 status=error + error.error_code=10024，不得判成正常收尾"
+    },
+    "stream_drawing.txt": {
+      "conversation_id": "6ad071c81e3ea99552558626", "history_id": "6ad071c81e3ea99552558627",
+      "frames": 6, "finished": true, "error_code": null, "truncated": null,
+      "text_len": 0, "text_sha": "", "text_head": "",
+      "reasoning_len": 0, "reasoning_sha": "",
+      "image_count": 4, "image_url_head": "https://sfile.chatglm.cn/testpath/6ad071c81e3ea9",
+      "image_sha": "0dbfd9e9226c3a5b",
+      "point": "生图 6 帧：1 空文本 init + 4 image(finish) + 1 one_to_more_finish；正文为空，产物只有 4 张图"
+    },
+    "history.json": {
+      "conversation_id": "6ad16e02581cc70756919ade", "turns": 2,
+      "message_ids": ["6ad16e02581cc70756919adf", "6ad16e10b68b5e037ba5d78a"],
+      "created_at_head": "2026-10-16 08:21:22",
+      "pairs": [["只回复两个字：收到", "收到"], ["我上一句让你回复什么？", "您让我只回复两个字：**收到**，我照做"]],
+      "text_sha": "aa23892979c69d3e", "user_sha": "28c0c755f213f124",
+      "point": "一轮 = input(用户)+output(助手) 成对，output.parts 与 SSE 帧同构"
+    }
+  },
+
+  "known_divergences": [
+    {"id": "V1", "topic": "40012 退避重试",
+     "python": "默认指数退避重试 4 次（MAX_RETRIES=4，RETRY_BASE_DELAY=1.0，含抖动）",
+     "go": "不重试，直接返回 transient_rejection（exit 4）",
+     "aligned_to_goal1": false},
+    {"id": "V2", "topic": "refer__991 支持",
+     "python": "仍保留 Credential.refer_991 / GLM_REFER_991，命中时拼进 query",
+     "go": "彻底移除，无该字段",
+     "aligned_to_goal1": false},
+    {"id": "V3", "topic": "Accept-Encoding",
+     "python": "gzip, deflate, br, zstd（靠 urllib3 解压，br/zstd 需额外模块）",
+     "go": "gzip, deflate（stdlib 手工解压，零依赖）"},
+    {"id": "V4", "topic": "Content-Type",
+     "python": "POST 不发 Content-Type（requests 对 data=bytes 不自动加）",
+     "go": "有 body 时发 application/json;charset=UTF-8（与抓包一致）"},
+    {"id": "V5", "topic": "凭据落盘的未知键与并发保护",
+     "python": "只写 5 个已知键（refer_991 会被抹掉）；无并发覆盖检测",
+     "go": "保留未知键；写前比对磁盘，被别的进程轮换则拒绝覆盖"},
+    {"id": "V6", "topic": "生图产物的暴露形式",
+     "python": "图片 URL 以 Markdown 拼进 result.text；无 polished prompt",
+     "go": "独立 image 事件（url + polished_prompt + index），done.images 汇总"},
+    {"id": "V7", "topic": "cogview 参数下发",
+     "python": "generate_image 总是带 style/scene（默认 none）",
+     "go": "只在显式传入时才带 style/scene/ratio；rm_label_watermark 由 --rm-watermark 决定"},
+    {"id": "V8", "topic": "stream 语义保证",
+     "python": "stream=True 原样透传字节，不做收尾校验（由调用方负责）",
+     "go": "只有一种形态：解析帧 + 必然校验收尾，截断即 exit 5"},
+    {"id": "V9", "topic": "单会话历史",
+     "python": "history() 返回上游 result 原样 dict",
+     "go": "History() 原样 + ParseHistory() 规范化成 Turn（user/text/reasoning/images）"},
+    {"id": "V10", "topic": "参考图改图 edit_image",
+     "python": "已实现（EP_IMAGE_REFERENCE，单图公网 URL）",
+     "go": "未实现（只有常量与文档）"},
+    {"id": "V11", "topic": "CLI 能力面",
+     "python": "python -m glm2api 仅 user-info/models/conversations/chat/history/rename/delete/refresh，无生图入口、无 show/title/stop/read/agents/schema/dry-run",
+     "go": "chat/user/models/agents/auth/conv{list,show,history,rename,title,delete,stop,read}/raw/schema/help，生图走 chat --ratio"},
+    {"id": "V12", "topic": "代理配置",
+     "python": "只有 --proxy / proxies 参数",
+     "go": "--proxy + $GLM_PROXY"},
+    {"id": "V13", "topic": "积分便捷读法",
+     "python": "client.left_score() 返回「分」浮点",
+     "go": "无同名方法，CLI 里折算成 credits（积分）"},
+    {"id": "V14", "topic": "会话自动翻页",
+     "python": "iter_conversations() 库级迭代器",
+     "go": "只在 CLI 的 conv list --all 里翻页，协议层无迭代器"},
+    {"id": "V15", "topic": "refresh 用的 cookie jar",
+     "python": "独立 Session（不与业务 jar 互相污染）",
+     "go": "复用同一 jar"}
+  ]
+}

@@ -45,7 +45,7 @@ type Event struct {
 	Code       string `json:"code,omitempty"`
 	Message    string `json:"message,omitempty"`
 	Detail     string `json:"detail,omitempty"`
-	Retryable  bool   `json:"retryable,omitempty"`
+	Retryable  *bool  `json:"retryable,omitempty"` // 指针：nil=不出现（非 error 事件）；error 事件恒出现，false 也要表达「不可重试」
 	HTTPStatus int    `json:"http_status,omitempty"`
 	BizStatus  int    `json:"biz_status,omitempty"`
 }
@@ -61,7 +61,8 @@ func (e *Event) Err(err error) *Event {
 		ge = &Error{Code: CUpstream, Message: err.Error()}
 	}
 	e.Type, e.Code, e.Message = "error", ge.Code.String(), ge.Message
-	e.Detail, e.Retryable, e.HTTPStatus, e.BizStatus = ge.Detail, ge.Code.Retryable(), ge.HTTPStatus, ge.BizStatus
+	rb := ge.Code.Retryable()
+	e.Detail, e.Retryable, e.HTTPStatus, e.BizStatus = ge.Detail, &rb, ge.HTTPStatus, ge.BizStatus
 	if e.RequestID == "" {
 		e.RequestID = ge.RequestID
 	}

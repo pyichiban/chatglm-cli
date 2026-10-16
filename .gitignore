@@ -1,0 +1,21 @@
+# 凭据（绝不入库）：本工具默认读 ./glm_credential.json 与 ~/.glm2cli/credential.json
+glm_credential.json
+*.credential.json
+.env
+
+# 构建产物
+dist/
+*.exe
+*.exe~
+/chatglm-cli
+/glm2cli
+*.test
+*.out
+
+# Go 工作区与编辑器
+vendor/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

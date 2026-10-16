@@ -1,0 +1,226 @@
+{
+  "conversation_id": "6ad16e02581cc70756919ade",
+  "messages": [
+    {
+      "id": "6ad16e02581cc70756919adf",
+      "conversation_id": "6ad16e02581cc70756919ade",
+      "update_time": "2026-10-16 08:21:24",
+      "create_time": "2026-10-16 08:21:22",
+      "create_time_str": "今天",
+      "input": {
+        "content": [
+          {
+            "text": "只回复两个字：收到",
+            "type": "text"
+          }
+        ],
+        "meta_data": {
+          "input_question_type": "xxxx",
+          "exp_groups": [
+            "mainchat_funcall:exp:A",
+            "chat_aisearch:exp:A",
+            "mainchat_rag:exp:B",
+            "mainchat_searchengine:exp:sogou",
+            "mainchat_32b:control:B",
+            "chat_live_4o:exp:A",
+            "mainchat_server:exp:A",
+            "mainchat_browser:exp:new",
+            "mainchat_server_app:exp:A",
+            "chat_glms_models_202412:exp:A",
+            "mainchat_sug:exp:A",
+            "chat_drawing_server:exp:A",
+            "chat_search_rag:exp:B",
+            "chat_assistant_server:exp:A",
+            "chat_drawing_streamv2:exp:A",
+            "chat_draw_sug_prompt:exp:B",
+            "chat_assistant_multi_recall:exp:A",
+            "chat_deep_thinking:exp:deepseek",
+            "mainchat_rm_fc:exp:add",
+            "mainchat_dr:exp:open",
+            "chat_auto_entrance:exp:A",
+            "chat_deep_research_staging:exp:B",
+            "chat_search_hot_query:exp:exp:A",
+            "mainchat_moe:exp:300",
+            "mainchat_fc:exp:all46",
+            "mainchat_search_abtest:exp:volc"
+          ],
+          "client_city": "Beijing",
+          "is_networking": true,
+          "answer_type": "text",
+          "plus_model_available": true,
+          "correct": 0,
+          "selected_model": "glm-5.3-flash"
+        },
+        "role": "user"
+      },
+      "output": {
+        "role": "assistant",
+        "parts": [
+          {
+            "id": "6ad16e02581cc70756919adf",
+            "logic_id": "12064390-f40e-44b7-94a5-df9b718f4372",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "收到",
+                "tool_calls": {},
+                "third_distribute": {},
+                "agent_distribute": {}
+              }
+            ],
+            "model": "moe_53f",
+            "recipient": "",
+            "meta_data": {
+              "auto_glm_data": {},
+              "correct": 0
+            },
+            "status": "finish"
+          }
+        ],
+        "status": "finish",
+        "last_error": {}
+      },
+      "score": {},
+      "memory_score": {}
+    },
+    {
+      "id": "6ad16e10b68b5e037ba5d78a",
+      "conversation_id": "6ad16e02581cc70756919ade",
+      "update_time": "2026-10-16 08:21:38",
+      "create_time": "2026-10-16 08:21:36",
+      "create_time_str": "今天",
+      "input": {
+        "content": [
+          {
+            "text": "我上一句让你回复什么？",
+            "type": "text"
+          }
+        ],
+        "meta_data": {
+          "input_question_type": "xxxx",
+          "exp_groups": [
+            "mainchat_funcall:exp:A",
+            "chat_aisearch:exp:A",
+            "mainchat_rag:exp:B",
+            "mainchat_searchengine:exp:sogou",
+            "mainchat_32b:control:B",
+            "chat_live_4o:exp:A",
+            "mainchat_server:exp:A",
+            "mainchat_browser:exp:new",
+            "mainchat_server_app:exp:A",
+            "chat_glms_models_202412:exp:A",
+            "mainchat_sug:exp:A",
+            "chat_drawing_server:exp:A",
+            "chat_search_rag:exp:B",
+            "chat_assistant_server:exp:A",
+            "chat_drawing_streamv2:exp:A",
+            "chat_draw_sug_prompt:exp:B",
+            "chat_assistant_multi_recall:exp:A",
+            "chat_deep_thinking:exp:deepseek",
+            "mainchat_rm_fc:exp:add",
+            "mainchat_dr:exp:open",
+            "chat_auto_entrance:exp:A",
+            "chat_deep_research_staging:exp:B",
+            "chat_search_hot_query:exp:exp:A",
+            "mainchat_moe:exp:300",
+            "mainchat_fc:exp:all46",
+            "mainchat_search_abtest:exp:volc"
+          ],
+          "client_city": "Beijing",
+          "is_networking": true,
+          "answer_type": "text",
+          "plus_model_available": true,
+          "correct": 0,
+          "selected_model": "glm-5.3-flash"
+        },
+        "role": "user"
+      },
+      "output": {
+        "role": "assistant",
+        "parts": [
+          {
+            "id": "6ad16e10b68b5e037ba5d78a",
+            "logic_id": "ad7872d4-3f99-4d79-9a14-4d19c98f1e95",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "think",
+                "text": "",
+                "tool_calls": {},
+                "third_distribute": {},
+                "agent_distribute": {},
+                "think": "You asked me to reply with \"收到\" (received/acknowledged), and that's exactly what I replied."
+              }
+            ],
+            "model": "moe_53f",
+            "recipient": "",
+            "meta_data": {
+              "auto_glm_data": {},
+              "show_type": "mc_tool_think2",
+              "correct": 0,
+              "tool_result_extra": {
+                "tool_call_name": ""
+              }
+            },
+            "status": "finish"
+          },
+          {
+            "id": "6ad16e10b68b5e037ba5d78a",
+            "logic_id": "9400f9d8-058b-4756-884a-b10c9fa5fbf0",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "tool_calls",
+                "text": "",
+                "tool_calls": {
+                  "name": "finish",
+                  "arguments": "{}"
+                },
+                "third_distribute": {},
+                "agent_distribute": {}
+              }
+            ],
+            "model": "moe_53f",
+            "recipient": "",
+            "meta_data": {
+              "auto_glm_data": {},
+              "show_type": "mc_tool_call2",
+              "correct": 0
+            },
+            "status": "finish"
+          },
+          {
+            "id": "6ad16e10b68b5e037ba5d78a",
+            "logic_id": "ef09255f-0424-4617-b986-93097bba1c83",
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "您让我只回复两个字：**收到**，我照做了。",
+                "tool_calls": {},
+                "third_distribute": {},
+                "agent_distribute": {}
+              }
+            ],
+            "model": "moe_53f",
+            "recipient": "",
+            "meta_data": {
+              "auto_glm_data": {},
+              "correct": 0
+            },
+            "status": "finish"
+          }
+        ],
+        "status": "finish",
+        "last_error": {}
+      },
+      "score": {},
+      "memory_score": {}
+    }
+  ],
+  "new_ai_search_conversation": true,
+  "plus_model_available": true,
+  "if_plus_model": false,
+  "project_id": ""
+}

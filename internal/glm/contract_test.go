@@ -274,6 +274,7 @@ func TestContractConstants(t *testing.T) {
 		"conv_list": EP_CONV_LIST, "chat": EP_CHAT, "history": EP_CONV_MESSAGES,
 		"history_v2_dead": EP_HISTORY, "bulk_delete": EP_BULK_DELETE, "modify_title": EP_MODIFY_TITLE,
 		"conv_title": EP_CONV_TITLE, "update_status": EP_UPDATE_STATUS, "stop_stream": EP_STOP_STREAM,
+		"edit": EP_IMAGE_REFERENCE,
 	}
 	if !reflect.DeepEqual(got, c.Endpoints) {
 		t.Errorf("端点表与契约不一致: got=%v want=%v", got, c.Endpoints)
@@ -474,8 +475,8 @@ func TestContractRequestShapes(t *testing.T) {
 		byPath[g.path] = g
 	}
 	for name, want := range c.RequestShapes {
-		if name == "refresh" || name == "chat" {
-			continue // refresh 单测覆盖；chat 是 SSE，另测
+		if name == "refresh" || name == "chat" || name == "edit" { // refresh/edit 有专属测试
+			continue
 		}
 		ep := c.Endpoints[want.Endpoint]
 		g, ok := byPath[ep]
@@ -936,4 +937,90 @@ func TestContractConvListAllPaginates(t *testing.T) {
 	if want.Method != "POST" || c.Endpoints[want.Endpoint] != EP_CONV_LIST {
 		t.Errorf("conv_list 形状与契约不符")
 	}
+}
+
+// ── edit（参考图生图）：端点请求形状，契约 v3 新增 ─────────
+func TestContractEditShape(t *testing.T) {
+	c, _ := loadContract(t)
+	want := c.RequestShapes["edit"]
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &gotBody)
+		fmt.Fprintf(w, `{"status":0,"result":{"image_url":"https://sfile/x_0.jpg","conversation_id":%q}}`,
+			strings.Repeat("c", 24))
+	}))
+	defer srv.Close()
+	cl := newTestClient(t, srv.URL)
+	raw, err := cl.EditImage("https://host/ref.jpg", "把背景改成夜空", "", "1:1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotBody) == 0 {
+		t.Fatalf("没打到端点")
+	}
+	keys := keysOfAny(gotBody)
+	if sortedStr(keys) != sortedStr(want.BodyKeys) {
+		t.Errorf("edit body 键 = %s，期望 %s", sortedStr(keys), sortedStr(want.BodyKeys))
+	}
+	if gotBody["image_url"] != "https://host/ref.jpg" || gotBody["assistant_id"] != c.Agents["drawing"] ||
+		gotBody["type"] != "Intelligent Editing" || gotBody["rm_label_watermark"] != true {
+		t.Errorf("edit body 关键字段错: %v", gotBody)
+	}
+	var res struct {
+		ImageURL       string `json:"image_url"`
+		ConversationID string `json:"conversation_id"`
+	}
+	if json.Unmarshal(raw, &res) != nil || res.ImageURL == "" || len(res.ConversationID) != 24 {
+		t.Errorf("result 解析错: %s", raw)
+	}
+	b := EditBody("u", "把背景改成夜空", "", "", true)
+	if !strings.HasPrefix(b["title"].(string), "【智能编辑】 ") {
+		t.Errorf("title 缺省前缀错: %v", b["title"])
+	}
+}
+
+// ── image_pipeline：拼版预算/图床回退与实现一致（契约 v3 新增）──
+func TestContractImagePipeline(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "contract.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var full struct {
+		ImagePipeline struct {
+			Command   string `json:"command"`
+			Blocking  bool   `json:"blocking"`
+			RefsCompo struct {
+				BudgetPixels int    `json:"budget_pixels"`
+				Format       string `json:"format"`
+			} `json:"refs_composite"`
+			Upload struct {
+				Primary  string `json:"primary"`
+				Fallback string `json:"fallback"`
+				Body     string `json:"body"`
+			} `json:"upload"`
+		} `json:"image_pipeline"`
+	}
+	if json.Unmarshal(raw, &full) != nil {
+		t.Fatal("image_pipeline 解析失败")
+	}
+	p := full.ImagePipeline
+	if p.Command != "image" || !p.Blocking {
+		t.Errorf("image_pipeline.command/blocking 错: %+v", p)
+	}
+	if p.RefsCompo.BudgetPixels != 4800000 || p.RefsCompo.Format != "jpeg" {
+		t.Errorf("拼版预算与实现不一致: %+v", p.RefsCompo)
+	}
+	if !strings.Contains(p.Upload.Primary, "meitu") || !strings.Contains(p.Upload.Fallback, "icve") ||
+		!strings.Contains(p.Upload.Body, "raw binary") {
+		t.Errorf("upload 契约描述与实现不符: %+v", p.Upload)
+	}
+}
+
+func keysOfAny(m map[string]any) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }

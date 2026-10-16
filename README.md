@@ -13,6 +13,9 @@
 
 ## 1. 构建与安装
 
+> 依赖：仅 Go 标准库 + `golang.org/x/image`（官方扩展包，只用 webp/bmp/tiff 解码与 CatmullRom
+> 缩放、basicfont 标注，用于参考图拼版）；协议层与 CLI 本体零第三方依赖。
+
 ```bash
 go test ./...                                   # 离线测试（真实帧回放，不发网络请求）
 bash scripts/build.sh                           # win+linux 单文件到 dist/
@@ -64,6 +67,7 @@ glm2cli help [conv|version]        用法
 
 ```
 conv list                [--agent ID|别名] [--grep 关键词]     全部智能体的完整列表（内部自动翻页，默认不过滤）
+image                    一键生图（阻塞）：见 §3.5
 conv show       CID                                 元数据 + 自动标题
 conv history    CID      [--agent A] [--raw]        逐条输出 user/text/reasoning/images
 conv rename     CID TITLE|--title T|--title-file P   改标题
@@ -108,10 +112,33 @@ glm2cli raw --path chatglm/mainchat-api/conversation/messages \
 glm2cli chat "用一句话介绍你自己"                       # 直接敲，事件流刷出来
 printf '很长的多行提示词\n第二行' | glm2cli chat        # stdin
 glm2cli chat --cid 6ad16e02581cc70756919ade "继续"     # 续接上一轮
-glm2cli chat --ratio 3:4 --title 猫 "戴礼帽的橘猫"      # 生图（画图 agent）+ 顺手改名
+glm2cli chat --ratio 3:4 --title 猫 "戴礼帽的橘猫"      # 文生图（画图 agent）+ 顺手改名
 glm2cli user | jq .data.left_score                     # 余额（单位「分」，原样不折算）
 glm2cli conv list | jq -r 'select(.type=="item").data.title'   # 完整列表（内部自动翻页）
 ```
+
+### 3.5 `image` 一键生图（阻塞直到完成或出错）
+
+```bash
+# 文生图（无参考图，走画图 agent，一次最多 4 图，自动下载）：
+glm2cli image "一只戴黑色礼帽的橘猫，扁平插画" --out ./out
+
+# 参考图生图（1~N 张：自动拼版 → 图床上传 → 智能编辑，产物单图）：
+glm2cli image --out out.jpg \
+  "reference1 是鲸鱼娘角色，reference2 是精灵角色；让两人同框交谈，身份特征严格遵循参考图" \
+  whale.jpg vesna.jpg
+```
+
+内部流程（每步都有 item 进度事件）：
+
+1. **拼版**（仅当有参考图）：所有参考图等比例缩入网格，每张外围画红圈、下方标注
+   `reference1..N`，最终 JPEG 面积 ≤480w 像素（上游 500w 硬约束留余量）；
+2. **上传图床**：file.sang.pub `meitu` 通道（落地 meitudata.com 大陆 CDN），失败自动回退
+   `icve` 通道；raw binary body（multipart 会被存成信封，勿改）；
+3. **智能编辑**：`POST drawing-api/v1/image/reference`（17~22s 同步；单图接口；输出比例跟随输入图）；
+4. **下载保存**：`--out` 为目录或 `.jpg` 文件路径，默认当前目录按时间戳命名；非 JPEG/PNG 直接报错。
+
+> 提示词里用 `reference1`/`reference2` 指代对应参考图；两个服务都是免费匿名第三方，参考图勿含敏感内容。
 
 **agent（无 TTY、只靠契约与退出码）**
 

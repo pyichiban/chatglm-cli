@@ -146,3 +146,32 @@ func (c *Client) StopStream(mid string) (json.RawMessage, error) {
 func (c *Client) UpdateStatus(mid string) (json.RawMessage, error) {
 	return c.Do(http.MethodPost, EP_UPDATE_STATUS, nil, map[string]any{"history_id": mid})
 }
+
+// EditBody 构造 image/reference 请求体（智能编辑）。
+// ⚠️ image_url 必须是上游服务器能拉到的公网 URL；输出比例跟随输入图，ratio 仅透传。
+func EditBody(imageURL, prompt, title, ratio string, rmWatermark bool) map[string]any {
+	if ratio == "" {
+		ratio = "1:1"
+	}
+	if title == "" {
+		r := []rune(prompt)
+		if len(r) > 40 {
+			r = r[:40]
+		}
+		title = "【智能编辑】 " + string(r)
+	}
+	return map[string]any{
+		"image_url": imageURL, "file_id": "", "type": "Intelligent Editing",
+		"category": 1, "conversation_id": "", "history_id": "",
+		"assistant_id": ASSISTANT_DRAWING, "prompt": prompt,
+		"if_plus_model": false, "title": title,
+		"aspect_ratio": ratio, "rm_label_watermark": rmWatermark,
+	}
+}
+
+// EditImage 参考图生图：同步长请求（17~22s），返回 result 原样
+// （{image_url, conversation_id}）。
+func (c *Client) EditImage(imageURL, prompt, title, ratio string, rmWatermark bool) (json.RawMessage, error) {
+	return c.Do(http.MethodPost, EP_IMAGE_REFERENCE, nil,
+		EditBody(imageURL, prompt, title, ratio, rmWatermark))
+}

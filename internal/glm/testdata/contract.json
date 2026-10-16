@@ -45,7 +45,8 @@
     "modify_title": "/chatglm/mainchat-api/conversation/modify_title",
     "conv_title": "/chatglm/mainchat-api/conversation/title",
     "update_status": "/chatglm/mainchat-api/stream/update_status",
-    "stop_stream": "/chatglm/mainchat-api/stream/stop_stream"
+    "stop_stream": "/chatglm/mainchat-api/stream/stop_stream",
+    "edit": "/chatglm/drawing-api/v1/image/reference"
   },
 
   "agents": {
@@ -131,7 +132,24 @@
     "stop_stream": {"method": "POST", "endpoint": "stop_stream", "body_keys": ["history_id"]},
     "update_status": {"method": "POST", "endpoint": "update_status", "body_keys": ["history_id"]},
     "refresh": {"method": "POST", "endpoint": "refresh", "body": {},
-                "auth_token": "refresh_token", "rotates_refresh_token": "sometimes"}
+                "auth_token": "refresh_token", "rotates_refresh_token": "sometimes"},
+    "edit": {"method": "POST", "endpoint": "edit",
+             "body_keys": ["assistant_id", "aspect_ratio", "category", "conversation_id",
+                           "file_id", "history_id", "if_plus_model", "image_url",
+                           "prompt", "rm_label_watermark", "title", "type"],
+             "note": "同步长请求 17~22s；单图接口；输出比例跟随输入图；image_url 必须上游可达"}
+  },
+
+  "image_pipeline": {
+    "command": "image",
+    "blocking": true,
+    "refs_composite": {"budget_pixels": 4800000, "format": "jpeg", "quality": 92,
+                       "labels": "reference1..N + 红圈，等比例缩放放入网格"},
+    "upload": {"primary": "file.sang.pub meitu 通道（落地 meitudata.com）",
+               "fallback": "file.sang.pub icve 通道（落地 file.icve.com.cn）",
+               "body": "raw binary（非 multipart）+ X-Upload-Type/X-File-Name/X-File-Size 头"},
+    "zero_refs": "走 chat 通道 drawing agent（cogview），一次返回最多 4 图",
+    "output": "产物下载后按 --out 落盘；非 JPEG/PNG 直接报错"
   },
 
   "sse_rules": {

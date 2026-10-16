@@ -44,6 +44,10 @@ const (
 	EP_CONV_TITLE    = "/chatglm/mainchat-api/conversation/title"        // GET ?conversation_id
 	EP_UPDATE_STATUS = "/chatglm/mainchat-api/stream/update_status"      // POST {history_id}
 	EP_STOP_STREAM   = "/chatglm/mainchat-api/stream/stop_stream"        // POST {history_id}
+	// EP_IMAGE_REFERENCE 参考图生图（智能编辑）：单图接口、image_url 必须是上游可达的公网 URL；
+	// 输出比例强制跟随输入图（aspect_ratio 传值无效）；耗时 17~22s 同步返回。
+	// 多张参考图由调用方先客户端拼版（internal/imgutil，见 contract.json image_pipeline）。
+	EP_IMAGE_REFERENCE = "/chatglm/drawing-api/v1/image/reference"
 )
 
 // ── IDE 客户端指纹（逐头照抄，WAF 校验的是「头组合指纹」）─────

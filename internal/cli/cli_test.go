@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -132,5 +133,59 @@ func TestCommandsCovered(t *testing.T) {
 		if !names[want] {
 			t.Errorf("命令表缺 %q", want)
 		}
+	}
+}
+
+// TestSplitImageArgs：image 命令的提示词/参考图拆分规则。
+func TestSplitImageArgs(t *testing.T) {
+	cases := []struct {
+		promptFlag string
+		rest       []string
+		refFlags   []string
+		wantPrompt string
+		wantRefs   int
+		wantErr    bool
+	}{
+		{"画只猫", nil, nil, "画只猫", 0, false},
+		{"", []string{"画只猫", "a.jpg", "b.png"}, nil, "画只猫", 2, false},
+		{"", []string{"a.jpg"}, []string{"b.jpg"}, "a.jpg", 1, false}, // 无 --prompt ⇒ 第一个位置参数是提示词
+		{"", nil, nil, "", 0, true},
+		{"画只猫", []string{"a.jpg"}, []string{"b.jpg"}, "画只猫", 2, false},
+	}
+	for i, c := range cases {
+		prompt, refs, err := splitImageArgs(c.promptFlag, c.rest, c.refFlags)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("case %d 应报错", i)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("case %d: %v", i, err)
+			continue
+		}
+		if prompt != c.wantPrompt || len(refs) != c.wantRefs {
+			t.Errorf("case %d: prompt=%q refs=%d，期望 %q/%d", i, prompt, len(refs), c.wantPrompt, c.wantRefs)
+		}
+	}
+}
+
+// TestResolveOutPath：--out 的目录/文件/多图序号规则。
+func TestResolveOutPath(t *testing.T) {
+	dir := t.TempDir()
+	if got := resolveOutPath("", "20260102_150405", 1, 1); filepath.Dir(got) == "" {
+		t.Errorf("默认当前目录: %q", got)
+	}
+	if got := resolveOutPath(dir, "b", 1, 1); filepath.Dir(got) != dir || filepath.Ext(got) != ".jpg" {
+		t.Errorf("目录形态: %q", got)
+	}
+	if got := resolveOutPath(filepath.Join(dir, "out.jpg"), "b", 1, 1); got != filepath.Join(dir, "out.jpg") {
+		t.Errorf("单图文件形态: %q", got)
+	}
+	if got := resolveOutPath(filepath.Join(dir, "out.jpg"), "b", 2, 4); got != filepath.Join(dir, "out-2.jpg") {
+		t.Errorf("多图序号形态: %q", got)
+	}
+	if got := resolveOutPath(filepath.Join(dir, "noext"), "b", 1, 1); filepath.Ext(got) != ".jpg" {
+		t.Errorf("无扩展名当目录: %q", got)
 	}
 }

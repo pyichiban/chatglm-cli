@@ -47,6 +47,10 @@ type Flags struct {
 	TitleFile   string
 	RMWatermark bool
 
+	// image：一键生图
+	Refs listValue
+	Out  string
+
 	// raw：逆向逃生门
 	Method, Path, Body string
 
@@ -81,6 +85,8 @@ func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.Title, "title", "", "会话标题：chat 给新会话改名；conv rename 的新标题")
 	fs.StringVar(&f.TitleFile, "title-file", "", "从文件读标题（避开 shell 引号）")
 	fs.BoolVar(&f.RMWatermark, "rm-watermark", false, "cogview.rm_label_watermark（是否真去水印 [未知]）")
+	fs.Var(&f.Refs, "ref", "参考图路径（image 命令，可重复；也可用位置参数）")
+	fs.StringVar(&f.Out, "out", "", "生成图保存位置：目录或 .jpg 文件路径（image 命令；默认当前目录按时间戳命名）")
 
 	fs.StringVar(&f.Grep, "grep", "", "按标题子串过滤")
 	fs.BoolVar(&f.Yes, "yes", false, "危险操作（delete）的显式确认")
@@ -89,6 +95,15 @@ func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.Method, "method", "GET", "raw: HTTP 方法 GET|POST")
 	fs.StringVar(&f.Path, "path", "", "raw: 以 /chatglm/ 开头的端点路径")
 	fs.StringVar(&f.Body, "body", "", "raw: JSON 请求体（'-' 从 stdin 读）")
+}
+
+// listValue 是重复型 flag（image 的多张参考图）。
+type listValue []string
+
+func (l *listValue) String() string { return strings.Join(*l, ",") }
+func (l *listValue) Set(v string) error {
+	*l = append(*l, v)
+	return nil
 }
 
 // kvValue 是重复型 flag（history 实试验证未实证的翻页参数）。
@@ -128,6 +143,7 @@ type Cmd struct {
 func commands() []Cmd {
 	return []Cmd{
 		{Name: "chat", Usage: "流式对话：[-p 提示词|--cid ID] [--agent main|drawing] [--model M] [--mode M] [--effort E] [--web=false] [--ratio R] [--title T] [提示词]", Run: runChat},
+		{Name: "image", Usage: "一键生图（阻塞）：[-p 提示词] [参考图1 参考图2…] [--ref 图] [--out 路径] [--ratio R]；无参考图=文生图(≤4图)，有参考图=拼版→图床→智能编辑", Run: runImage},
 		{Name: "user", Usage: "当前用户信息（含积分余额）；--raw 输出上游原样", Run: runUser},
 		{Name: "models", Usage: "可用模型与 reasoning_effort 枚举", Run: runModels},
 		{Name: "agents", Usage: "内置智能体（assistant_id）表", Run: runAgents},
@@ -232,9 +248,9 @@ func exec(c Cmd, f *Flags) int {
 		}
 		return 0
 	}
-	// --dry-run 不碰凭据、不发网络（chat/conv/raw 会自己打印请求体，其余命令给一行就够）
+	// --dry-run 不碰凭据、不发网络（chat/conv/raw/image 会自己打印请求体，其余命令给一行就够）
 	if f.DryRun {
-		if c.Name == "chat" || c.Name == "conv" || c.Name == "raw" {
+		if c.Name == "chat" || c.Name == "conv" || c.Name == "raw" || c.Name == "image" {
 			if err := c.Run(a); err != nil {
 				a.fail(err)
 				return code(err)
@@ -352,22 +368,8 @@ func runChat(a *App) error {
 		return nil
 	}
 
-	resp, err := a.c.Chat(opt)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
 	newConv := f.CID == ""
-	var metaSent bool
-	agg, rerr := glm.ReadStream(resp.Body, func(e *glm.Event) { a.ev(e) }, func(g *glm.Agg) {
-		if metaSent {
-			return
-		}
-		metaSent = true // 拿到首帧再发 meta ⇒ meta 里的 conversation_id 一定是真实值（首轮由服务端懒创建）
-		a.ev(&glm.Event{Type: "meta", Cmd: "chat", ConversationID: g.ConversationID, MessageID: g.MessageID,
-			AgentID: agent, Model: f.Model, New: newConv, TS: a.start.Unix()})
-	})
+	agg, rerr := a.streamChatEvents(opt, "chat", newConv)
 	a.ev(&glm.Event{Type: "done", Cmd: "chat", ConversationID: agg.ConversationID, MessageID: agg.MessageID,
 		AgentID: agg.AgentID, Model: agg.Model, Frames: agg.Frames, New: newConv,
 		ElapsedMS: time.Since(a.start).Milliseconds(), Finished: agg.Finished, Images: agg.Images,
@@ -386,6 +388,25 @@ func runChat(a *App) error {
 		}
 	}
 	return nil
+}
+
+// streamChatEvents 执行一次对话流：透传全部事件（meta 在拿到首帧后先发 ⇒
+// conversation_id 必是懒创建后的真实值），返回聚合结果；调用方负责 done 与收尾。
+func (a *App) streamChatEvents(opt glm.ChatOpt, cmd string, newConv bool) (*glm.Agg, error) {
+	resp, err := a.c.Chat(opt)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var metaSent bool
+	return glm.ReadStream(resp.Body, func(e *glm.Event) { a.ev(e) }, func(g *glm.Agg) {
+		if metaSent {
+			return
+		}
+		metaSent = true
+		a.ev(&glm.Event{Type: "meta", Cmd: cmd, ConversationID: g.ConversationID, MessageID: g.MessageID,
+			AgentID: opt.Agent, Model: opt.Model, New: newConv, TS: a.start.Unix()})
+	})
 }
 
 // stopBestEffort 在流被截断/被 Ctrl-C 后尽力中止服务端生成（失败就忽略，不掩盖主错误）。

@@ -114,3 +114,7 @@ func AGENTS() []map[string]string {
 		{"id": ASSISTANT_STUDY, "name": "学习搭子", "alias": "study"},
 	}
 }
+
+// EDIT_PROMPT_CONSTRAINT 参考图生图时硬编码注入到用户提示词前的约束
+// （拼版排版是工具侧产物，模型不得复刻；契约见 contract.json image_pipeline.prompt_prefix）。
+const EDIT_PROMPT_CONSTRAINT = "根据参考图中的人或物，按照下面提示词绘制结果图，不要复刻参考图的排版样式"

@@ -1,10 +1,12 @@
 // Package imgutil 提供「多参考图拼版 + 图床上传」能力，供一键生图命令使用。
 //
-// 拼版算法（contract.json image_pipeline）：
-//   - justified 行布局：按输入图宽高比贪心分行，行内等高缩放、行宽对齐画布，
-//     二分搜索最大画宽使得 总面积 ≤ 预算 且 单图放大倍数 ≤ UpscaleCap ⇒ 内容像素最大化；
-//   - 每张参考图：方形 outline 画在图像**外侧**（不遮有效像素）+ 下方标注条 reference1..N；
-//   - 最终 JPEG 面积不超过预算（默认 480w，留余量低于上游 500w 硬约束）。
+// 拼版规则（contract.json image_pipeline）：
+//   - **单行左右布局**：所有参考图等高缩放、从左到右排列（N 不限），每张的标注条
+//     `referenceN` 在其图像正下方、且**在 outline 框内** ⇒ 标注归属无歧义；
+//   - 框与框之间留足空白（UnitGap），标注不会认错邻居；
+//   - 单元图高二分搜索最大化：总面积 ≤ 预算（480w，上游 500w 硬约束留余量），
+//     且单图放大 ≤ UpscaleCap（小图不无限拉伸）；
+//   - 方形外框画在单元**外侧**，不遮任何有效像素。
 package imgutil
 
 import (
@@ -18,7 +20,6 @@ import (
 	_ "image/png" // 注册 png 解码
 	"math"
 	"os"
-	"sort"
 
 	_ "golang.org/x/image/bmp"      // 注册 bmp 解码
 	xdraw "golang.org/x/image/draw" // 高质量缩放（CatmullRom）
@@ -32,21 +33,24 @@ import (
 const (
 	// PixelBudget 是拼版结果的像素面积上限（上游 >500w 会静默异常，留余量）。
 	PixelBudget = 4_800_000
-	// BudgetTarget 实际瞄准的填充比例（留 2% 余量给编码器/取整）。
+	// BudgetTarget 实际瞄准的填充比例。
 	BudgetTarget = 0.98
-	// StripH 是每行下方标注条高度（含 3x 文字）。
-	StripH = 48
-	// Gap 是同行两张图之间的间距；Margin 是画布外边距。
-	Gap    = 24
-	Margin = 16
-	// OutlineGap/OutlineW 方形外框：外扩距离与线宽（严格在图像外侧，不遮像素）。
-	OutlineGap = 6
-	OutlineW   = 4
+	// BarH 是图像下方、框内的标注条高度（含 3x 文字）。
+	BarH = 40
+	// UnitGap 是两个带框单元之间的留白（用户要求：别挨太近，标注归属要清晰）。
+	UnitGap = 40
+	// Margin 是画布外边距。
+	Margin = 24
+	// FramePad 是 outline 框与单元内容的间距；OutlineW 是线宽。
+	FramePad = 6
+	OutlineW = 4
 	// UpscaleCap 单图最大放大倍数（避免小图被拉大成纯模糊）。
 	UpscaleCap = 4.0
+	// MinUnitH 单元图高的下限（极小图也不至于缩没）。
+	MinUnitH = 64
 )
 
-// Placement 是一张参考图在拼版画布上的最终位置（缩放后尺寸）。
+// Placement 是一张参考图的图像区域位置（不含框与标注条）。
 type Placement struct {
 	Index int // 原始顺序（0-based），标注为 reference{Index+1}
 	X, Y  int
@@ -56,11 +60,70 @@ type Placement struct {
 type layout struct {
 	W, H       int
 	Placements []Placement
-	UsedPixels int // Σ 缩放后图像面积（衡量填充率）
+	UsedPixels int
 }
 
-// BuildRefSheet 把多张参考图拼成一张 JPEG：等比例缩放 + 方形外框 + reference1..N 标注。
-// 返回 JPEG 字节与最终尺寸。
+// BestLayout 计算单行左右布局：二分搜索单元图高（max：面积 ≤ 预算、放大 ≤ 上限）。
+func BestLayout(imgs []image.Image, budget int) layout {
+	hi := math.Inf(1)
+	for _, im := range imgs { // 放大上限：任一图超 4 倍即不可行
+		hi = math.Min(hi, UpscaleCap*float64(origH(im)))
+	}
+	lo := 16.0
+	if hi < lo {
+		hi = lo // 极小图兑底：至少给最小高度
+	}
+	var best layout
+	ok := false
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		if l, feasible := tryLayout(imgs, mid, budget); feasible {
+			best, ok = l, true
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if !ok { // 极小图兜底：用下限高度
+		best, _ = tryLayout(imgs, math.Max(16, hi), budget)
+	}
+	return best
+}
+
+// tryLayout 以单元图高 h 排一行，校验画布面积 ≤ 预算。
+func tryLayout(imgs []image.Image, h float64, budget int) (layout, bool) {
+	if len(imgs) == 0 || h < 1 {
+		return layout{}, false
+	}
+	uh := int(h)
+	bar := BarH
+	frameOff := FramePad + OutlineW
+	canvasW := 2*Margin + 2*frameOff + UnitGap*(len(imgs)-1)
+	canvasH := 2*Margin + 2*frameOff + uh + bar
+	for _, im := range imgs {
+		canvasW += int(float64(uh) * aspect(im))
+	}
+	if float64(canvasW)*float64(canvasH) > float64(budget)*BudgetTarget {
+		return layout{}, false
+	}
+	placements := make([]Placement, 0, len(imgs))
+	x := Margin + frameOff
+	y := Margin + frameOff
+	used := 0
+	for i, im := range imgs {
+		w := int(float64(uh) * aspect(im))
+		if w < 1 {
+			w = 1
+		}
+		placements = append(placements, Placement{Index: i, X: x, Y: y, W: w, H: uh})
+		used += w * uh
+		x += w + UnitGap
+	}
+	return layout{W: canvasW, H: canvasH, Placements: placements, UsedPixels: used}, true
+}
+
+// BuildRefSheet 把多张参考图拼成一张 JPEG：单行左右布局，每张图像正下方（框内）
+// 标注 reference1..N，方形外框画在单元外侧。返回 JPEG 字节与最终尺寸。
 func BuildRefSheet(paths []string) ([]byte, int, int, error) {
 	if len(paths) == 0 {
 		return nil, 0, 0, fmt.Errorf("没有参考图")
@@ -80,20 +143,18 @@ func BuildRefSheet(paths []string) ([]byte, int, int, error) {
 
 	red := color.RGBA{R: 220, A: 255}
 	for _, p := range lay.Placements {
-		im := imgs[p.Index]
-		scaled := scaleTo(im, p.W, p.H)
-		r := image.Rect(p.X, p.Y, p.X+p.W, p.Y+p.H)
-		draw.Draw(sheet, r, scaled, scaled.Bounds().Min, draw.Over)
-		// 方形外框：画在图像外侧（外扩 OutlineGap），绝不覆盖有效像素
-		drawRectOutline(sheet,
-			image.Rect(p.X-OutlineGap, p.Y-OutlineGap, p.X+p.W+OutlineGap, p.Y+p.H+OutlineGap),
-			OutlineW, red)
-		// 标注条：图像正下方（strip 高度已计入行高），深灰底 + 白字 referenceN
-		barTop := p.Y + p.H + OutlineGap + OutlineW
-		bar := image.Rect(p.X-OutlineGap, barTop, p.X+p.W+OutlineGap, p.Y+p.H+StripH)
-		draw.Draw(sheet, bar, image.NewUniform(color.RGBA{R: 40, G: 40, B: 40, A: 255}),
+		scaled := scaleTo(imgs[p.Index], p.W, p.H)
+		imgRect := image.Rect(p.X, p.Y, p.X+p.W, p.Y+p.H)
+		draw.Draw(sheet, imgRect, scaled, scaled.Bounds().Min, draw.Over)
+		// 标注条：图像正下方、框内（深灰底白字）
+		barRect := image.Rect(p.X, p.Y+p.H, p.X+p.W, p.Y+p.H+BarH)
+		draw.Draw(sheet, barRect, image.NewUniform(color.RGBA{R: 40, G: 40, B: 40, A: 255}),
 			image.Point{}, draw.Src)
-		drawLabel(sheet, fmt.Sprintf("reference%d", p.Index+1), bar.Dx()/2+bar.Min.X, (bar.Min.Y+bar.Max.Y)/2)
+		drawLabel(sheet, fmt.Sprintf("reference%d", p.Index+1),
+			(barRect.Min.X+barRect.Max.X)/2, (barRect.Min.Y+barRect.Max.Y)/2)
+		// 方形外框：围绕「图像+标注条」单元，画在外侧不遮像素
+		unit := image.Rect(p.X, p.Y, p.X+p.W, p.Y+p.H+BarH)
+		drawRectOutline(sheet, unit.Inset(-FramePad), OutlineW, red)
 	}
 
 	var buf bytes.Buffer
@@ -101,119 +162,6 @@ func BuildRefSheet(paths []string) ([]byte, int, int, error) {
 		return nil, 0, 0, err
 	}
 	return buf.Bytes(), lay.W, lay.H, nil
-}
-
-// BestLayout 在候选画布纵横比里选「内容像素最大化」的 justified 行布局。
-// 纯函数（只依赖输入图像的尺寸），可测。
-func BestLayout(imgs []image.Image, budget int) layout {
-	ratios := canvasAspectCandidates(imgs)
-	var best layout
-	for _, R := range ratios {
-		if l, ok := searchWidth(imgs, R, budget); ok && l.UsedPixels > best.UsedPixels {
-			best = l
-		}
-	}
-	if best.Placements == nil { // 兜底（理论不可达）：最小布局
-		best, _ = searchWidth(imgs, 1.0, 1<<20)
-	}
-	return best
-}
-
-// searchWidth 在几何递增的画宽阶梯上扫描，返回「内容像素最大化」的布局。
-// used(W) 非单调（行高被放大上限鍳住后，增大 W 只会产生留白），故用阶梯扫描而非二分。
-func searchWidth(imgs []image.Image, R float64, budget int) (layout, bool) {
-	var best layout
-	ok := false
-	for W := 64.0; W <= 8192.0; W *= 1.25 {
-		if l, feasible := tryLayout(imgs, W, R, budget); feasible && l.UsedPixels > best.UsedPixels {
-			best, ok = l, true
-		}
-	}
-	return best, ok
-}
-
-// tryLayout 以行高驱动值 W、画布纵横比 R 做 justified 行布局。
-// 行成员只由 R 决定；行高 = min(等高值, 该行放大上限)，画布宽由最宽的行决定（内容驱动，
-// 被鍳住的行允许右侧留白，把预算让给大图）。
-func tryLayout(imgs []image.Image, W float64, R float64, budget int) (layout, bool) {
-	if len(imgs) == 0 {
-		return layout{}, false
-	}
-	usable := W - 2*Margin
-	if usable < 64 {
-		return layout{}, false
-	}
-	H := 2 * Margin
-	canvasW := 0
-	placements := make([]Placement, 0, len(imgs))
-	used := 0
-	flushRow := func(row []int) bool {
-		if len(row) == 0 {
-			return true
-		}
-		sum := 0.0
-		for _, i := range row {
-			sum += aspect(imgs[i])
-		}
-		hrCap := math.Inf(1)
-		for _, i := range row { // 行高鍳制：任一图放大不得超过 UpscaleCap
-			hrCap = math.Min(hrCap, UpscaleCap*float64(origH(imgs[i])))
-		}
-		hr := math.Min(usable/sum, hrCap)
-		x := Margin
-		rowW := 0
-		for _, i := range row {
-			w := int(float64(hr) * aspect(imgs[i]))
-			if w < 1 {
-				w = 1
-			}
-			placements = append(placements, Placement{Index: i, X: x, Y: int(H), W: w, H: int(hr)})
-			used += w * int(hr)
-			x += w + Gap
-			rowW = x - Gap
-		}
-		if rowW > canvasW {
-			canvasW = rowW
-		}
-		H += int(hr) + StripH
-		return true
-	}
-	row, rowSum := []int{}, 0.0
-	for i, im := range imgs {
-		_ = im
-		row = append(row, i)
-		rowSum += aspect(im)
-		if rowSum >= R { // 行累计纵横比达到画布纵横比 ⇒ 结行（填充率最高）
-			flushRow(row)
-			row, rowSum = nil, 0
-		}
-	}
-	flushRow(row)
-	l := layout{W: canvasW + 2*Margin, H: int(H), Placements: placements, UsedPixels: used}
-	if float64(l.W)*float64(l.H) > float64(budget)*BudgetTarget {
-		return layout{}, false
-	}
-	return l, true
-}
-
-// canvasAspectCandidates 候选画布纵横比：常见比例 + 输入图纵横比的几何平均。
-func canvasAspectCandidates(imgs []image.Image) []float64 {
-	geo := 1.0
-	for _, im := range imgs {
-		geo *= aspect(im)
-	}
-	geo = math.Pow(geo, 1/float64(len(imgs)))
-	set := map[int64]bool{}
-	var out []float64
-	for _, r := range []float64{1.0, 4.0 / 3, 3.0 / 4, 16.0 / 9, 9.0 / 16, 3.0 / 2, 2.0 / 3, geo} {
-		k := int64(math.Round(r * 1000))
-		if !set[k] {
-			set[k] = true
-			out = append(out, r)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
-	return out
 }
 
 func aspect(im image.Image) float64 {
@@ -246,10 +194,9 @@ func scaleTo(im image.Image, w, h int) image.Image {
 	return dst
 }
 
-// drawRectOutline 方形描边：只画四条边所在的环带（严格在 rect 外部调用时不会遮像素）。
+// drawRectOutline 方形描边：四条边环带，调用方保证 rect 在内容外侧。
 func drawRectOutline(dst *image.RGBA, r image.Rectangle, thickness int, c color.RGBA) {
 	for i := 0; i < thickness; i++ {
-		// 外扩第 i 圈
 		top := image.Rect(r.Min.X-i, r.Min.Y-i, r.Max.X+i, r.Min.Y-i+1)
 		bot := image.Rect(r.Min.X-i, r.Max.Y+i-1, r.Max.X+i, r.Max.Y+i)
 		left := image.Rect(r.Min.X-i, r.Min.Y-i, r.Min.X-i+1, r.Max.Y+i)

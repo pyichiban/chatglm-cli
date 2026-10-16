@@ -995,8 +995,11 @@ func TestContractImagePipeline(t *testing.T) {
 				Format       string `json:"format"`
 				Outline      string `json:"outline"`
 				Layout       string `json:"layout"`
+				Labels       string `json:"labels"`
+				UnitGap      int    `json:"unit_gap"`
 			} `json:"refs_composite"`
-			Upload struct {
+			PromptPrefix string `json:"prompt_prefix"`
+			Upload       struct {
 				Primary  string `json:"primary"`
 				Fallback string `json:"fallback"`
 				Body     string `json:"body"`
@@ -1016,8 +1019,13 @@ func TestContractImagePipeline(t *testing.T) {
 	}
 	if p.RefsCompo.BudgetPixels != 4800000 || p.RefsCompo.Format != "jpeg" ||
 		!strings.Contains(p.RefsCompo.Outline, "方形") ||
-		!strings.Contains(p.RefsCompo.Layout, "内容像素最大化") {
+		!strings.Contains(p.RefsCompo.Layout, "单行左右布局") ||
+		!strings.Contains(p.RefsCompo.Labels, "框内") ||
+		p.RefsCompo.UnitGap != 40 {
 		t.Errorf("拼版契约与实现不一致: %+v", p.RefsCompo)
+	}
+	if p.PromptPrefix != EDIT_PROMPT_CONSTRAINT {
+		t.Errorf("prompt_prefix 与 CLI 硬编码约束不一致: %q", p.PromptPrefix)
 	}
 	if !p.RmWatermark.Hardcoded || !strings.Contains(p.RmWatermark.Evidence, "实证") {
 		t.Errorf("水印默认值契约错: %+v", p.RmWatermark)

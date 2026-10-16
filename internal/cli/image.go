@@ -70,7 +70,7 @@ func runImage(a *App) error {
 	if a.dryRun {
 		a.result("dry-run", map[string]any{"cmd": "image", "refs": refs,
 			"steps": []string{"composite", "upload", "submit", "download"},
-			"body":  glm.EditBody("<上传后直链>", prompt, "", f.Ratio)})
+			"body":  glm.EditBody("<上传后直链>", glm.EDIT_PROMPT_CONSTRAINT+"\n\n"+prompt, "", f.Ratio)})
 		return nil
 	}
 
@@ -90,8 +90,13 @@ func runImage(a *App) error {
 	}
 	a.step("upload.done", map[string]any{"url": url, "host": host})
 
-	// 3) 智能编辑（同步长请求 17~22s）
-	raw, err := a.c.EditImage(url, prompt, "", f.Ratio)
+	// 3) 智能编辑（同步长请求 17~22s）：提示词前注入硬编码约束（title 仍用用户原文）
+	fullPrompt := glm.EDIT_PROMPT_CONSTRAINT + "\n\n" + prompt
+	r := []rune(prompt)
+	if len(r) > 40 {
+		r = r[:40]
+	}
+	raw, err := a.c.EditImage(url, fullPrompt, "【智能编辑】 "+string(r), f.Ratio)
 	if err != nil {
 		return err
 	}

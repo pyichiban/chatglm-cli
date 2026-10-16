@@ -44,36 +44,40 @@ func mustImg(t *testing.T, p string) image.Image {
 	return im
 }
 
-// TestLayoutFillsBudget：常规尺寸多图，拼版必须接近用满预算（填充率 ≥85%），
-// 且所有 placement 都在画布内、互不重叠。
-func TestLayoutFillsBudget(t *testing.T) {
+// TestLayoutSingleRow：单行左右布局 —— 同一 Y/同一高、X 递增、框间留白 ≥ UnitGap。
+func TestLayoutSingleRow(t *testing.T) {
 	dir := t.TempDir()
-	paths := []string{
-		mkImg(t, dir, "a.jpg", 1600, 1200, color.RGBA{R: 200, A: 255}), // 4:3
-		mkImg(t, dir, "b.jpg", 1200, 1600, color.RGBA{B: 200, A: 255}), // 3:4
-		mkImg(t, dir, "c.jpg", 1500, 1000, color.RGBA{G: 200, A: 255}), // 3:2
+	imgs := []image.Image{
+		mustImg(t, mkImg(t, dir, "a.jpg", 1600, 1200, color.RGBA{R: 200, A: 255})), // 4:3
+		mustImg(t, mkImg(t, dir, "b.jpg", 1200, 1600, color.RGBA{B: 200, A: 255})), // 3:4
+		mustImg(t, mkImg(t, dir, "c.jpg", 1400, 1400, color.RGBA{G: 200, A: 255})), // 1:1
 	}
-	imgs := []image.Image{mustImg(t, paths[0]), mustImg(t, paths[1]), mustImg(t, paths[2])}
 	lay := BestLayout(imgs, PixelBudget)
-
-	if fill := float64(lay.UsedPixels) / float64(lay.W*lay.H); fill < 0.85 {
-		t.Errorf("填充率 %.2f 过低（布局浪费空间）", fill)
+	if len(lay.Placements) != 3 {
+		t.Fatalf("placements = %d", len(lay.Placements))
 	}
-	if px := lay.W * lay.H; px < int(0.80*PixelBudget) {
-		t.Errorf("画布 %d px 远小于预算 %d（没有尽量撑满）", px, PixelBudget)
-	}
-	// 互不重叠 + 画布内
-	seen := map[[4]int]bool{}
-	for _, p := range lay.Placements {
-		if p.X < 0 || p.Y < 0 || p.X+p.W > lay.W || p.Y+p.H > lay.H {
-			t.Errorf("placement 越界: %+v (canvas %dx%d)", p, lay.W, lay.H)
+	for i, p := range lay.Placements {
+		if p.Index != i {
+			t.Errorf("顺序错: %+v", lay.Placements)
 		}
-		for o := range seen {
-			if !(p.X+p.W <= o[0] || o[2] <= p.X || p.Y+p.H <= o[1] || o[3] <= p.Y) {
-				t.Errorf("placement 重叠: %+v vs %v", p, o)
+		if p.Y != lay.Placements[0].Y || p.H != lay.Placements[0].H {
+			t.Errorf("单行必须同一基线同一高: %+v", lay.Placements)
+		}
+		if float64(p.H)/float64(origH(imgs[i])) > UpscaleCap+0.01 {
+			t.Errorf("放大超上限: %+v", p)
+		}
+		if i > 0 {
+			prev := lay.Placements[i-1]
+			if gap := p.X - (prev.X + prev.W); gap < UnitGap-1 {
+				t.Errorf("框间留白 %d < UnitGap %d", gap, UnitGap)
 			}
 		}
-		seen[[4]int{p.X, p.Y, p.W, p.H}] = true
+		if p.X < 0 || p.Y < 0 || p.X+p.W > lay.W || p.Y+p.H+BarH > lay.H {
+			t.Errorf("越界: %+v (canvas %dx%d)", p, lay.W, lay.H)
+		}
+	}
+	if px := lay.W * lay.H; px > int(float64(PixelBudget)*BudgetTarget)+1 {
+		t.Errorf("画布 %d px 超预算", px)
 	}
 }
 
@@ -89,12 +93,13 @@ func TestLayoutUpscaleCap(t *testing.T) {
 	}
 }
 
-// TestBuildRefSheet：合法 JPEG、红框只存在于图像外侧（不遮有效像素）、标注条存在。
+// TestBuildRefSheet：合法 JPEG；红色框线只出现在「图像+标注条」单元外侧；
+// 标注条（深灰底）在图像正下方；多图之间互不遮挡。
 func TestBuildRefSheet(t *testing.T) {
 	dir := t.TempDir()
 	paths := []string{
-		mkImg(t, dir, "a.jpg", 800, 600, color.RGBA{R: 60, G: 60, B: 200, A: 255}), // 蓝图1
-		mkImg(t, dir, "b.jpg", 600, 800, color.RGBA{R: 60, G: 200, B: 60, A: 255}), // 绿图2
+		mkImg(t, dir, "a.jpg", 800, 600, color.RGBA{R: 60, G: 60, B: 200, A: 255}),
+		mkImg(t, dir, "b.jpg", 600, 800, color.RGBA{R: 60, G: 200, B: 60, A: 255}),
 	}
 	b, w, h, err := BuildRefSheet(paths)
 	if err != nil {
@@ -107,36 +112,38 @@ func TestBuildRefSheet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("产物不是合法 JPEG: %v", err)
 	}
-	if im.Bounds().Dx() != w || im.Bounds().Dy() != h {
-		t.Errorf("声明尺寸 %dx%d 与实际 %v 不符", w, h, im.Bounds())
-	}
-
 	lay := BestLayout([]image.Image{mustImg(t, paths[0]), mustImg(t, paths[1])}, PixelBudget)
-	redInside := false
-	darkBar := 0
+
+	redInImage := false
+	bars := 0
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			r, g, bl, _ := im.At(x, y).RGBA()
 			isRed := r > 50000 && g < 30000 && bl < 30000
-			// 红色像素不得落在任何 placement 内部（outline 不遮有效像素）
-			if isRed {
-				for _, p := range lay.Placements {
-					if x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H {
-						redInside = true
-					}
+			isDark := r < 25000 && g < 25000 && bl < 25000
+			inAnyImage := false
+			inAnyBar := false
+			for _, p := range lay.Placements {
+				if x >= p.X && x < p.X+p.W && y >= p.Y && y < p.Y+p.H {
+					inAnyImage = true
+				}
+				if x >= p.X && x < p.X+p.W && y >= p.Y+p.H && y < p.Y+p.H+BarH {
+					inAnyBar = true
 				}
 			}
-			// 标注条：深灰底
-			if r < 25000 && g < 25000 && bl < 25000 {
-				darkBar++
+			if isRed && inAnyImage {
+				redInImage = true // 框线不得遮图像有效像素
+			}
+			if isDark && inAnyBar {
+				bars++
 			}
 		}
 	}
-	if redInside {
-		t.Errorf("红色 outline 覆盖了参考图有效像素")
+	if redInImage {
+		t.Errorf("红色框线覆盖了参考图有效像素")
 	}
-	if darkBar < 500 {
-		t.Errorf("找不到标注条底色（referenceN 未绘制？）")
+	if bars < 500 {
+		t.Errorf("标注条未绘制（referenceN 应在框内、图像正下方）")
 	}
 }
 

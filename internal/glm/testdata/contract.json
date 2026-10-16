@@ -1,7 +1,7 @@
 {
-  "contract_version": 1,
+  "contract_version": 2,
   "updated": "2026-10-16",
-  "note": "跨语言契约基准。Python(chatglm2api) 与 Go(chatglm-cli) 两套独立实现各自断言本文件；\nfixtures 段的期望值由「另一套实现 + 真实抓包帧」反推，防止同源污染。\nknown_divergences 显式记录两边当前不一致之处（各自断言自己的那一项，改动即失败 ⇒ 逼迫更新契约）。",
+  "note": "跨语言契约基准。Python(chatglm2api) 与 Go(chatglm-cli) 两套独立实现各自断言本文件。\nfixtures 段的期望值由「另一套实现 + 真实抓包帧」反推，防止同源污染。\nknown_divergences 只保留**有意为之**的差异；实现细节不一致一律对齐到 Go（2026-10-16 定稿：\nV1 退避/V2 refer_991/V3 压缩头/V4 Content-Type/V5 凭据落盘/V6 生图暴露/V7 cogview/V8 流式保证/\nV9 历史规范化/V10 edit_image/V12 代理/V13 余额/V14 内部翻页 均已对齐或移除，Python 生图功能整体删除，\nPython 定位为 Go 版子集）。",
 
   "channel": {
     "name": "ide",
@@ -12,13 +12,16 @@
     "sec_ch_ua": "\"Not;A=Brand\";v=\"8\", \"Chromium\";v=\"150\"",
     "ua_markers": ["Electron/", "Platform/ChatGLM_Win", "DeviceId/", "AppVersion/2.0.6"],
     "referer__991_required": false,
+    "accept_encoding": "gzip, deflate",
+    "content_type_on_body": "application/json;charset=UTF-8",
     "header_names": ["Accept", "Accept-Encoding", "Accept-Language", "App-Name", "Authorization",
       "Origin", "Sec-Fetch-Dest", "Sec-Fetch-Mode", "Sec-Fetch-Site", "User-Agent",
       "X-App-Platform", "X-App-Version", "X-App-fr", "X-Device-Brand", "X-Device-Model",
       "X-Exp-Groups", "X-Lang", "X-Nonce", "X-Sign", "X-Timestamp",
       "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"],
     "per_request_extra_headers": ["X-Device-Id", "X-Request-Id"],
-    "never_headers": ["Cookie"]
+    "never_headers": ["Cookie"],
+    "proxy_support": false
   },
 
   "sign": {
@@ -42,8 +45,7 @@
     "modify_title": "/chatglm/mainchat-api/conversation/modify_title",
     "conv_title": "/chatglm/mainchat-api/conversation/title",
     "update_status": "/chatglm/mainchat-api/stream/update_status",
-    "stop_stream": "/chatglm/mainchat-api/stream/stop_stream",
-    "image_reference": "/chatglm/drawing-api/v1/image/reference"
+    "stop_stream": "/chatglm/mainchat-api/stream/stop_stream"
   },
 
   "agents": {
@@ -61,7 +63,7 @@
     "page_size": 20,
     "history_page_size_v2": 30,
     "meta_platform": "pc",
-    "left_score_unit": "分（100 分 = 1 积分）",
+    "left_score_unit": "分（原样返回，不折算：目前不消耗积分）",
     "cid_pattern": "^[0-9a-f]{24}$"
   },
 
@@ -71,6 +73,11 @@
     "connect_sec": 15, "read_sec": 60, "auth_skew_sec": 300,
     "stream_total_timeout": null,
     "rule": "流式请求不得设任何总超时；截断必须报错，不得伪造收尾帧"
+  },
+
+  "retry": {
+    "enabled": false,
+    "rule": "不退避重试（IDE 链路实测稳定）：命中 40012 直接报 transient_rejection；HTTP 401 自愈（刷新凭据后只重试一次）"
   },
 
   "env": {
@@ -87,8 +94,15 @@
 
   "credential_file": {
     "keys": ["refresh_token", "access_token", "device_id", "user_id", "extra_cookies"],
-    "write": "tmp + rename 原子替换",
+    "write": "tmp + rename 原子替换；写前重读磁盘，refresh 与本次依据不一致则拒绝覆盖（并发保护）",
+    "preserve_unknown_keys": true,
     "must_persist_after_refresh": true
+  },
+
+  "pagination": {
+    "conversation_list": "客户端内部按 page/page_size 翻页直到 has_more=false，对外一次返回完整列表（调用方不感知分页）",
+    "conversation_messages": "上游一次返回全量升序消息，无分页",
+    "rule": "凡列表类接口，实现层必须内部翻页，外部只见完整列表"
   },
 
   "chat_body": {
@@ -107,7 +121,8 @@
                 "pagination_params": [], "note": "升序全量返回，page_size/page 实测被忽略"},
     "history_v2": {"method": "GET", "endpoint": "history_v2_dead",
                    "query": ["assistant_id", "conversation_id", "page_size"]},
-    "conv_list": {"method": "POST", "endpoint": "conv_list", "body_keys": ["page", "page_size"]},
+    "conv_list": {"method": "POST", "endpoint": "conv_list", "body_keys": ["page", "page_size"],
+                  "note": "原始单页请求；对外 API 应使用内部翻页的完整列表封装"},
     "rename": {"method": "POST", "endpoint": "modify_title", "body_keys": ["conversation_id", "title"]},
     "conv_title": {"method": "GET", "endpoint": "conv_title", "query": ["conversation_id"]},
     "bulk_delete": {"method": "POST", "endpoint": "bulk_delete",
@@ -128,12 +143,14 @@
     "content_think_types": ["think", "tool_result", "quote_result"],
     "content_image_type": "image",
     "noise_line": "生图流末尾有一行不带 data: 前缀的裸 JSON 信封 {\"status\":0,...,\"rid\":...}，必须忽略",
-    "truncation": "未见 finish/error 即 EOF ⇒ 报 stream_truncated，禁止补结束帧",
+    "truncation": "未见 finish/error 即 EOF ⇒ 报 stream_truncated，禁止补结束帧；raw 透传形态也必须做同样校验",
     "usage_fields": null
   },
 
   "python_result_keys": ["conversation_id", "history_id", "text", "thinking", "parts",
                          "finished", "error", "frames"],
+
+  "python_turn_keys": ["message_id", "created_at", "user", "text", "reasoning", "images", "status"],
 
   "cli_event_contract": {
     "version": 1,
@@ -201,52 +218,12 @@
   },
 
   "known_divergences": [
-    {"id": "V1", "topic": "40012 退避重试",
-     "python": "默认指数退避重试 4 次（MAX_RETRIES=4，RETRY_BASE_DELAY=1.0，含抖动）",
-     "go": "不重试，直接返回 transient_rejection（exit 4）",
-     "aligned_to_goal1": false},
-    {"id": "V2", "topic": "refer__991 支持",
-     "python": "仍保留 Credential.refer_991 / GLM_REFER_991，命中时拼进 query",
-     "go": "彻底移除，无该字段",
-     "aligned_to_goal1": false},
-    {"id": "V3", "topic": "Accept-Encoding",
-     "python": "gzip, deflate, br, zstd（靠 urllib3 解压，br/zstd 需额外模块）",
-     "go": "gzip, deflate（stdlib 手工解压，零依赖）"},
-    {"id": "V4", "topic": "Content-Type",
-     "python": "POST 不发 Content-Type（requests 对 data=bytes 不自动加）",
-     "go": "有 body 时发 application/json;charset=UTF-8（与抓包一致）"},
-    {"id": "V5", "topic": "凭据落盘的未知键与并发保护",
-     "python": "只写 5 个已知键（refer_991 会被抹掉）；无并发覆盖检测",
-     "go": "保留未知键；写前比对磁盘，被别的进程轮换则拒绝覆盖"},
-    {"id": "V6", "topic": "生图产物的暴露形式",
-     "python": "图片 URL 以 Markdown 拼进 result.text；无 polished prompt",
-     "go": "独立 image 事件（url + polished_prompt + index），done.images 汇总"},
-    {"id": "V7", "topic": "cogview 参数下发",
-     "python": "generate_image 总是带 style/scene（默认 none）",
-     "go": "只在显式传入时才带 style/scene/ratio；rm_label_watermark 由 --rm-watermark 决定"},
-    {"id": "V8", "topic": "stream 语义保证",
-     "python": "stream=True 原样透传字节，不做收尾校验（由调用方负责）",
-     "go": "只有一种形态：解析帧 + 必然校验收尾，截断即 exit 5"},
-    {"id": "V9", "topic": "单会话历史",
-     "python": "history() 返回上游 result 原样 dict",
-     "go": "History() 原样 + ParseHistory() 规范化成 Turn（user/text/reasoning/images）"},
-    {"id": "V10", "topic": "参考图改图 edit_image",
-     "python": "已实现（EP_IMAGE_REFERENCE，单图公网 URL）",
-     "go": "未实现（只有常量与文档）"},
-    {"id": "V11", "topic": "CLI 能力面",
-     "python": "python -m glm2api 仅 user-info/models/conversations/chat/history/rename/delete/refresh，无生图入口、无 show/title/stop/read/agents/schema/dry-run",
-     "go": "chat/user/models/agents/auth/conv{list,show,history,rename,title,delete,stop,read}/raw/schema/help，生图走 chat --ratio"},
-    {"id": "V12", "topic": "代理配置",
-     "python": "只有 --proxy / proxies 参数",
-     "go": "--proxy + $GLM_PROXY"},
-    {"id": "V13", "topic": "积分便捷读法",
-     "python": "client.left_score() 返回「分」浮点",
-     "go": "无同名方法，CLI 里折算成 credits（积分）"},
-    {"id": "V14", "topic": "会话自动翻页",
-     "python": "iter_conversations() 库级迭代器",
-     "go": "只在 CLI 的 conv list --all 里翻页，协议层无迭代器"},
-    {"id": "V15", "topic": "refresh 用的 cookie jar",
-     "python": "独立 Session（不与业务 jar 互相污染）",
-     "go": "复用同一 jar"}
+    {"id": "V11", "topic": "CLI 能力面（有意为之的子集）",
+     "python": "python -m glm2api 仅 user-info/models/conversations/chat/history/rename/delete/refresh，定位是库自带的调试入口",
+     "go": "glm2cli 是面向人/agent 的完整 CLI：chat/user/models/agents/auth/conv{list,show,history,rename,title,delete,stop,read}/raw/schema/help"},
+    {"id": "V15", "topic": "refresh 用的 cookie jar（有意保留，避免账号风险）",
+     "python": "refresh 用独立 Session（不携带业务 access cookie）",
+     "go": "refresh 复用业务 jar",
+     "note": "无实证表明上游接受 access cookie + refresh Authorization 混发，改动需先抓包验证"}
   ]
 }

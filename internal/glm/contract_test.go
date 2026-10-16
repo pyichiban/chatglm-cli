@@ -33,6 +33,9 @@ type contract struct {
 		SecChUA                string   `json:"sec_ch_ua"`
 		UAMarkers              []string `json:"ua_markers"`
 		Refer991Required       bool     `json:"referer__991_required"`
+		AcceptEncoding         string   `json:"accept_encoding"`
+		ContentTypeOnBody      string   `json:"content_type_on_body"`
+		ProxySupport           bool     `json:"proxy_support"`
 		HeaderNames            []string `json:"header_names"`
 		PerRequestExtraHeaders []string `json:"per_request_extra_headers"`
 		NeverHeaders           []string `json:"never_headers"`
@@ -74,10 +77,21 @@ type contract struct {
 		WAFDropPrefix []string `json:"waf_drop_prefix"`
 	} `json:"cookies"`
 	CredFile struct {
-		Keys        []string `json:"keys"`
-		Write       string   `json:"write"`
-		MustPersist bool     `json:"must_persist_after_refresh"`
+		Keys                []string `json:"keys"`
+		Write               string   `json:"write"`
+		PreserveUnknownKeys bool     `json:"preserve_unknown_keys"`
+		MustPersist         bool     `json:"must_persist_after_refresh"`
 	} `json:"credential_file"`
+	Retry struct {
+		Enabled bool   `json:"enabled"`
+		Rule    string `json:"rule"`
+	} `json:"retry"`
+	Note       string `json:"note"`
+	Pagination struct {
+		ConversationList     string `json:"conversation_list"`
+		ConversationMessages string `json:"conversation_messages"`
+		Rule                 string `json:"rule"`
+	} `json:"pagination"`
 	ChatBody struct {
 		TopKeys           []string `json:"top_keys"`
 		MetaKeys          []string `json:"meta_keys"`
@@ -113,9 +127,7 @@ type contract struct {
 	} `json:"cli_event_contract"`
 	ExitCodes   map[string]int             `json:"exit_codes"`
 	Fixtures    map[string]json.RawMessage `json:"fixtures"`
-	Divergences []struct {
-		ID, Topic, Python, Go string
-	} `json:"known_divergences"`
+	Divergences []divJSON                  `json:"known_divergences"`
 }
 
 type fixtureWant struct {
@@ -194,11 +206,21 @@ func b64url(s string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(s))
 }
 
-func divergence(t *testing.T, c *contract, id string) (d struct{ ID, Topic, Python, Go string }) {
+type div struct{ ID, Topic, Python, Go, Note string }
+
+type divJSON struct {
+	ID     string `json:"id"`
+	Topic  string `json:"topic"`
+	Python string `json:"python"`
+	Go     string `json:"go"`
+	Note   string `json:"note"`
+}
+
+func divergence(t *testing.T, c *contract, id string) (d div) {
 	t.Helper()
 	for _, x := range c.Divergences {
 		if x.ID == id {
-			return x
+			return div{ID: x.ID, Topic: x.Topic, Python: x.Python, Go: x.Go, Note: x.Note}
 		}
 	}
 	t.Fatalf("契约里缺差异条目 %s", id)
@@ -252,7 +274,7 @@ func TestContractConstants(t *testing.T) {
 		"conv_list": EP_CONV_LIST, "chat": EP_CHAT, "history": EP_CONV_MESSAGES,
 		"history_v2_dead": EP_HISTORY, "bulk_delete": EP_BULK_DELETE, "modify_title": EP_MODIFY_TITLE,
 		"conv_title": EP_CONV_TITLE, "update_status": EP_UPDATE_STATUS, "stop_stream": EP_STOP_STREAM,
-		"image_reference": EP_IMAGE_REFERENCE}
+	}
 	if !reflect.DeepEqual(got, c.Endpoints) {
 		t.Errorf("端点表与契约不一致: got=%v want=%v", got, c.Endpoints)
 	}
@@ -327,21 +349,17 @@ func TestContractSignAndHeaders(t *testing.T) {
 	if len(h["X-Request-Id"]) != 32 {
 		t.Errorf("X-Request-Id 应为 32 hex")
 	}
-	// ⚠️ V3 差异：Go 只发 gzip/deflate（零依赖），Python 发 br/zstd
-	if h["Accept-Encoding"] != "gzip, deflate" {
-		t.Errorf("Accept-Encoding = %q", h["Accept-Encoding"])
+	// V3/V2/V12 已对齐（contract v2）：Accept-Encoding 只有 gzip/deflate；
+	// IDE 通道无 refer__991；不支持代理
+	if h["Accept-Encoding"] != c.Channel.AcceptEncoding {
+		t.Errorf("Accept-Encoding = %q，期望 %q", h["Accept-Encoding"], c.Channel.AcceptEncoding)
 	}
-	d := divergence(t, c, "V3")
-	if strings.Contains(d.Go, "br") || !strings.Contains(d.Python, "br") {
-		t.Errorf("V3 差异描述与实际不符: %+v", d)
+	if c.Channel.Refer991Required || c.Channel.ProxySupport {
+		t.Errorf("契约：IDE 通道无 refer__991、不支持代理")
 	}
-	// V2：Go 彻底移除 refer__991
-	if c.Channel.Refer991Required {
-		t.Errorf("IDE 通道不需要 refer__991")
-	}
-	d2 := divergence(t, c, "V2")
-	if !strings.Contains(d2.Go, "移除") {
-		t.Errorf("V2 应记录 Go 已移除 refer__991: %+v", d2)
+	// V4 已对齐：有 body 时发 Content-Type（线上头在 TestContractRequestShapes 断言）
+	if c.Channel.ContentTypeOnBody != "application/json;charset=UTF-8" {
+		t.Errorf("契约 content_type_on_body = %q", c.Channel.ContentTypeOnBody)
 	}
 }
 
@@ -405,11 +423,7 @@ func TestContractChatBody(t *testing.T) {
 	b4 := ChatBody(ChatOpt{Prompt: "x", Ratio: "1:1"})
 	cw4 := b4["meta_data"].(map[string]any)["cogview"].(map[string]any)
 	if _, ok := cw4["style"]; ok {
-		t.Errorf("V7：Go 不应自动补 style/scene")
-	}
-	d := divergence(t, c, "V7")
-	if !strings.Contains(d.Python, "总是带") {
-		t.Errorf("V7 描述与 Python 实际不符: %+v", d)
+		t.Errorf("对齐后：Go 不应自动补 style/scene（生图入口在 CLI --ratio）")
 	}
 }
 
@@ -486,13 +500,9 @@ func TestContractRequestShapes(t *testing.T) {
 			}
 		}
 	}
-	// V4：Go 有 body 时显式发 Content-Type（Python 不发）
-	if byPath[c.Endpoints["modify_title"]].hdr.Get("Content-Type") != "application/json;charset=UTF-8" {
-		t.Errorf("Go 侧应显式发 Content-Type（差异 V4）")
-	}
-	d := divergence(t, c, "V4")
-	if !strings.Contains(d.Python, "不发 Content-Type") {
-		t.Errorf("V4 描述与 Python 实际不符: %+v", d)
+	// V4 已对齐：Go 有 body 时显式发 Content-Type（与抓包一致）
+	if byPath[c.Endpoints["modify_title"]].hdr.Get("Content-Type") != c.Channel.ContentTypeOnBody {
+		t.Errorf("有 body 的请求必须发 Content-Type=%q", c.Channel.ContentTypeOnBody)
 	}
 }
 
@@ -555,13 +565,12 @@ func TestContractRefreshShapeAndPersist(t *testing.T) {
 			t.Errorf("写盘缺键 %s（契约 keys=%v）", k, c.CredFile.Keys)
 		}
 	}
-	// V5：Go 保留未知键，别把 Python 侧数据抹掉
+	// V5 已对齐：Go 保留未知键，与 Python/其它工具共用凭据文件不丢数据
 	if _, ok := m["refer_991"]; !ok {
-		t.Errorf("V5：未知键必须保留")
+		t.Errorf("未知键必须保留（credential_file.preserve_unknown_keys）")
 	}
-	d := divergence(t, c, "V5")
-	if !strings.Contains(d.Python, "抹掉") {
-		t.Errorf("V5 描述与 Python 实际不符: %+v", d)
+	if !c.CredFile.PreserveUnknownKeys {
+		t.Errorf("契约必须声明 preserve_unknown_keys=true")
 	}
 }
 
@@ -584,9 +593,17 @@ func TestContractTransientNoRetry(t *testing.T) {
 	if !ge.Code.Retryable() {
 		t.Errorf("transient 应标 retryable")
 	}
-	d := divergence(t, c, "V1")
-	if !strings.Contains(d.Go, "不重试") {
-		t.Errorf("V1 描述与 Go 实际不符: %+v", d)
+	// V1 已对齐（retry.enabled=false）：40012 只打一次，不重试
+	if c.Retry.Enabled {
+		t.Errorf("契约 retry.enabled 必须为 false（IDE 链路不退避）")
+	}
+	d := divergence(t, c, "V11") // 差异清单只剩有意为之的项
+	if !strings.Contains(d.Python, "调试入口") {
+		t.Errorf("V11 应描述 Python 为有意子集: %+v", d)
+	}
+	d15 := divergence(t, c, "V15")
+	if !strings.Contains(d15.Note, "抓包") {
+		t.Errorf("V15 应说明改动前置条件（需抓包验证）: %+v", d15)
 	}
 }
 
@@ -616,7 +633,7 @@ func TestContractErrorMapping(t *testing.T) {
 
 // ── SSE 语义：Go 必须与 Python 在同一份真实帧上给出同一组数字 ──
 func TestContractSSEFixtures(t *testing.T) {
-	c, want := loadContract(t)
+	_, want := loadContract(t)
 	for name, w := range want {
 		f, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
@@ -664,6 +681,10 @@ func TestContractSSEFixtures(t *testing.T) {
 		if w.ImageURLHead != "" && firstN(urls[0], 48) != w.ImageURLHead {
 			t.Errorf("%s 首图链前缀 = %q", name, firstN(urls[0], 48))
 		}
+		// V6 已对齐后钉住：Go 侧生图产物是独立 image 列表/事件，正文不拼 Markdown
+		if strings.Contains(text, "![") {
+			t.Errorf("%s：Go 正文不应拼图片 Markdown（生图暴露形式以 Go 为准）", name)
+		}
 		switch name {
 		case "stream_error.txt":
 			if rerr != nil {
@@ -674,11 +695,6 @@ func TestContractSSEFixtures(t *testing.T) {
 				t.Errorf("%s 应正常收尾: %v", name, rerr)
 			}
 		}
-	}
-	// V6 差异钉住：Go 独立 image 事件/列表，Python 拼进 text
-	d := divergence(t, c, "V6")
-	if !strings.Contains(d.Python, "Markdown") || !strings.Contains(d.Go, "image 事件") {
-		t.Errorf("V6 描述与实际不符: %+v", d)
 	}
 }
 
@@ -854,9 +870,9 @@ func TestContractHistoryShape(t *testing.T) {
 	if turns[0].User != "只回复两个字：收到" || turns[0].Text != "收到" {
 		t.Errorf("第一轮解析错: %+v", turns[0])
 	}
-	d := divergence(t, c, "V9")
-	if !strings.Contains(d.Go, "规范化") || !strings.Contains(d.Python, "原样") {
-		t.Errorf("V9 描述与实际不符: %+v", d)
+	// V9 已对齐：两仓都提供「原样 + 规范化」两层 API（Python history_turns / Go ParseHistory）
+	if !strings.Contains(c.Note, "对齐") {
+		t.Errorf("契约 note 应记录 2026-10-16 对齐轮次")
 	}
 }
 
@@ -885,4 +901,39 @@ func unique(xs []string) []string {
 		}
 	}
 	return out
+}
+
+// ── V14：会话列表必须内部翻页，对外一次返回完整列表 ────────
+func TestContractConvListAllPaginates(t *testing.T) {
+	c, _ := loadContract(t)
+	if !strings.Contains(c.Pagination.ConversationList, "内部") {
+		t.Errorf("契约 pagination.conversation_list 应描述内部翻页")
+	}
+	pages := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pages++
+		var list string
+		switch pages {
+		case 1:
+			list = `[{"conversation_id":"` + strings.Repeat("a", 24) + `","title":"P1"}]`
+		default:
+			list = `[{"conversation_id":"` + strings.Repeat("b", 24) + `","title":"P2"}]`
+		}
+		fmt.Fprintf(w, `{"status":0,"result":{"has_more":%v,"conversation_list":%s}}`, pages == 1, list)
+	}))
+	defer srv.Close()
+
+	cl := newTestClient(t, srv.URL)
+	all, err := cl.ConvListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || pages != 2 {
+		t.Fatalf("应内部翻 2 页拿全量 2 条，得到 %d 条 / %d 页", len(all), pages)
+	}
+	// 请求体形状不变（仍走原始单页端点 {page,page_size}）
+	want := c.RequestShapes["conv_list"]
+	if want.Method != "POST" || c.Endpoints[want.Endpoint] != EP_CONV_LIST {
+		t.Errorf("conv_list 形状与契约不符")
+	}
 }

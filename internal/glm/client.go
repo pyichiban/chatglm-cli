@@ -42,10 +42,10 @@ type Client struct {
 
 // Opt 配置客户端。
 type Opt struct {
-	Base, Proxy string
-	Insecure    bool
-	Timeout     time.Duration
-	Debug       bool
+	Base     string
+	Insecure bool
+	Timeout  time.Duration
+	Debug    bool
 }
 
 func NewClient(ctx context.Context, cred *Credential, opt Opt) (*Client, error) {
@@ -62,14 +62,8 @@ func NewClient(ctx context.Context, cred *Credential, opt Opt) (*Client, error) 
 	if err != nil {
 		return nil, NewErr(CUsage, "base 地址无效: %v", err)
 	}
+	// V12 对齐：不支持代理（IDE 通道实测直连稳定）
 	tr := &http.Transport{}
-	if px := strings.TrimSpace(opt.Proxy); px != "" {
-		pu, err := url.Parse(px)
-		if err != nil {
-			return nil, NewErr(CUsage, "proxy 无效: %v", err)
-		}
-		tr.Proxy = func(*http.Request) (*url.URL, error) { return pu, nil }
-	}
 	if opt.Insecure {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} // 仅调试用（配合本地抓包看明文）
 	}

@@ -63,8 +63,8 @@ glm2cli help [conv|version]        用法
 会话子命令：
 
 ```
-conv list                [--page N --size N --all] [--agent main|drawing] [--grep 关键词]
-conv show       CID      [--scan N]                 元数据 + 自动标题
+conv list                [--agent main|drawing] [--grep 关键词]     完整列表（内部自动翻页）
+conv show       CID                                 元数据 + 自动标题
 conv history    CID      [--agent A] [--raw]        逐条输出 user/text/reasoning/images
 conv rename     CID TITLE|--title T|--title-file P   改标题
 conv title      CID                                 只读自动标题
@@ -88,7 +88,7 @@ conv read       MESSAGE_ID                          标记已读
 | `--style` / `--scene` | 生图风格/场景，**实测已失效**，仅透传 |
 | `--rm-watermark` | `cogview.rm_label_watermark`（是否真去水印 [未知]） |
 
-全局 flag：`--cred --base --proxy --timeout --dry-run -v --insecure`；`--version`/`-V` 可放任意位置。
+全局 flag：`--cred --base --timeout --dry-run -v --insecure`；`--version`/`-V` 可放任意位置。不支持代理（IDE 通道直连）。
 `--timeout` **只作用于非流式请求**（含凭据刷新）；对话流刻意不设任何超时（带超时会把长回答掐断且没有终止帧）。
 
 `raw` 的例子（本次就是靠它发现历史端点的，不需要为探测改代码重编）：
@@ -109,8 +109,8 @@ glm2cli chat "用一句话介绍你自己"                       # 直接敲，�
 printf '很长的多行提示词\n第二行' | glm2cli chat        # stdin
 glm2cli chat --cid 6ad16e02581cc70756919ade "继续"     # 续接上一轮
 glm2cli chat --ratio 3:4 --title 猫 "戴礼帽的橘猫"      # 生图（画图 agent）+ 顺手改名
-glm2cli user | jq .data.credits                        # 积分余额
-glm2cli conv list --all | jq -r 'select(.type=="item").data.title'
+glm2cli user | jq .data.left_score                     # 余额（单位「分」，原样不折算）
+glm2cli conv list | jq -r 'select(.type=="item").data.title'   # 完整列表（内部自动翻页）
 ```
 
 **agent（无 TTY、只靠契约与退出码）**

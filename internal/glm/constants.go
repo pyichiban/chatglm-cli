@@ -44,8 +44,6 @@ const (
 	EP_CONV_TITLE    = "/chatglm/mainchat-api/conversation/title"        // GET ?conversation_id
 	EP_UPDATE_STATUS = "/chatglm/mainchat-api/stream/update_status"      // POST {history_id}
 	EP_STOP_STREAM   = "/chatglm/mainchat-api/stream/stop_stream"        // POST {history_id}
-	// EP_IMAGE_REFERENCE 参考图改图（单图、只收公网 URL）。本版未实现，仅留档。
-	EP_IMAGE_REFERENCE = "/chatglm/drawing-api/v1/image/reference"
 )
 
 // ── IDE 客户端指纹（逐头照抄，WAF 校验的是「头组合指纹」）─────
@@ -92,7 +90,6 @@ const (
 	ENV_USER_ID         = "GLM_USER_ID"
 	ENV_COOKIE          = "GLM_COOKIE"
 	ENV_CREDENTIAL_FILE = "GLM_CREDENTIAL_FILE"
-	ENV_PROXY           = "GLM_PROXY"
 )
 
 // 业务 cookie 与要丢弃的 CDN/WAF 浏览器指纹 cookie [实证 PROTOCOL §1.4]。

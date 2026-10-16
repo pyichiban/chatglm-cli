@@ -84,10 +84,36 @@ func (c *Client) Models() (json.RawMessage, error) {
 	return c.Do(http.MethodGet, EP_MODELS, map[string]string{"tag": "available_models"}, nil)
 }
 
-// ConvList 返回 {has_more, conversation_list}。翻页是纯页码 [实证 PROTOCOL §3.3]。
+// ConvList 单页原始请求（body {page,page_size}，翻页是纯页码）。
+// 一般请用 ConvListAll：对外只见完整列表，调用方不感知分页（contract.json pagination）。
 func (c *Client) ConvList(page, size int) (json.RawMessage, error) {
 	return c.Do(http.MethodPost, EP_CONV_LIST, nil,
 		map[string]any{"page": page, "page_size": size})
+}
+
+// ConvListAll 内部翻页直到 has_more=false，返回全部会话原样 JSON。
+func (c *Client) ConvListAll() ([]json.RawMessage, error) {
+	var out []json.RawMessage
+	for page := 1; ; page++ {
+		res, err := c.ConvList(page, DEFAULT_PAGE_SIZE)
+		if err != nil {
+			return nil, err
+		}
+		var body struct {
+			HasMore bool              `json:"has_more"`
+			List    []json.RawMessage `json:"conversation_list"`
+		}
+		if err := json.Unmarshal(res, &body); err != nil {
+			return nil, NewErr(CUpstream, "recent_list 响应结构异常: %v", err)
+		}
+		out = append(out, body.List...)
+		if !body.HasMore {
+			return out, nil
+		}
+		if page >= 1000 { // 防御上限：has_more 异常时不至于死循环
+			return out, NewErr(CUpstream, "recent_list 翻页异常（超过 1000 页仍 has_more）")
+		}
+	}
 }
 
 // 单会话历史（含规范化）见 history.go：上游老端点 page_messages_v2 是死路，已改用 mainchat-api/conversation/messages。

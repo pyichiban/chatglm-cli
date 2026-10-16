@@ -17,7 +17,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -30,7 +29,7 @@ const VERSION = "0.1.0"
 // Flags 是全部命令行参数（一张扁平表）。命令只读自己关心的字段，
 // 好处：flag 顺序无关（`--cid X chat` 与 `chat --cid X` 等价），未知 flag 直接报错。
 type Flags struct {
-	Cred, Base, Proxy       string
+	Cred, Base              string
 	Timeout                 int
 	DryRun, Debug, Insecure bool
 
@@ -51,12 +50,10 @@ type Flags struct {
 	// raw：逆向逃生门
 	Method, Path, Body string
 
-	Page, Size, Scan int
-	All              bool
-	Grep             string
-	Yes              bool
-	Raw              bool
-	Params           kvValue
+	Grep   string
+	Yes    bool
+	Raw    bool
+	Params kvValue
 
 	// 内部：解析后的位置参数（[0] 是命令名）
 	rest []string
@@ -65,7 +62,6 @@ type Flags struct {
 func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.Cred, "cred", "", "凭据文件（默认 $GLM_CREDENTIAL_FILE → ./glm_credential.json → ~/.glm2cli/credential.json）")
 	fs.StringVar(&f.Base, "base", glm.BASE, "上游基址")
-	fs.StringVar(&f.Proxy, "proxy", os.Getenv(glm.ENV_PROXY), "HTTP(S) 代理，如 http://127.0.0.1:10809")
 	fs.IntVar(&f.Timeout, "timeout", glm.READ_TIMEOUT, "非流式请求超时（秒）；流式不受此限制")
 	fs.BoolVar(&f.DryRun, "dry-run", false, "只打印将发送的请求，不发网络")
 	fs.BoolVar(&f.Debug, "v", false, "详细日志到 stderr")
@@ -86,10 +82,6 @@ func (f *Flags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.TitleFile, "title-file", "", "从文件读标题（避开 shell 引号）")
 	fs.BoolVar(&f.RMWatermark, "rm-watermark", false, "cogview.rm_label_watermark（是否真去水印 [未知]）")
 
-	fs.IntVar(&f.Page, "page", 1, "页码")
-	fs.IntVar(&f.Size, "size", glm.DEFAULT_PAGE_SIZE, "每页条数")
-	fs.IntVar(&f.Scan, "scan", 10, "conv show 最多扫描多少页找该会话")
-	fs.BoolVar(&f.All, "all", false, "自动翻页取全部")
 	fs.StringVar(&f.Grep, "grep", "", "按标题子串过滤")
 	fs.BoolVar(&f.Yes, "yes", false, "危险操作（delete）的显式确认")
 	fs.BoolVar(&f.Raw, "raw", false, "输出上游 result 原样，不做字段提取")
@@ -257,7 +249,7 @@ func exec(c Cmd, f *Flags) int {
 		a.fail(err)
 		return code(err)
 	}
-	cl, err := glm.NewClient(ctx, cred, glm.Opt{Base: f.Base, Proxy: f.Proxy, Insecure: f.Insecure,
+	cl, err := glm.NewClient(ctx, cred, glm.Opt{Base: f.Base, Insecure: f.Insecure,
 		Timeout: time.Duration(f.Timeout) * time.Second, Debug: f.Debug})
 	if err != nil {
 		a.fail(err)
@@ -475,18 +467,14 @@ func runUser(a *App) error {
 		uid = s
 	}
 	a.result("user", map[string]any{"uid": uid, "nickname": info["nickname"], "avatar": info["avatar"],
-		"is_guest": info["is_guest"], "phone": info["phone"], "credits": creditsOf(mi),
-		"token_left_percent": mi["token_left_percent"], "score_rule": mi["score_rule"], "raw": mi})
+		"is_guest": info["is_guest"], "phone": info["phone"], "left_score": mi["left_score"],
+		"member_info": mi})
 	return nil
 }
 
-// creditsOf 折算积分：member_info.left_score 单位「分」，100 分 = 1 积分 [实证 PROTOCOL §3.1]。
+// creditsOf 已废弃（V13 定稿：目前不消耗积分，余额原样返回不折算；保留空实现防误用）。
 func creditsOf(mi map[string]any) map[string]any {
-	if mi == nil {
-		return map[string]any{"left_score": nil, "credits": 0.0, "note": "访客账号无 member_info"}
-	}
-	f, _ := strconv.ParseFloat(fmt.Sprint(mi["left_score"]), 64)
-	return map[string]any{"left_score": mi["left_score"], "credits": f / 100}
+	return map[string]any{"left_score": mi["left_score"]}
 }
 
 func runModels(a *App) error {

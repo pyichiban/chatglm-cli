@@ -105,14 +105,17 @@ func TestValidRatio(t *testing.T) {
 	}
 }
 
-// TestCreditsOf 覆盖积分折算（left_score 单位「分」，100 分 = 1 积分）。
+// TestCreditsOf 覆盖余额输出（V13 定稿：不折算，原样返回 left_score）。
 func TestCreditsOf(t *testing.T) {
 	got := creditsOf(map[string]any{"left_score": "330.00"})
-	if got["credits"] != 3.3 {
-		t.Errorf("credits = %v", got["credits"])
+	if got["left_score"] != "330.00" {
+		t.Errorf("left_score = %v", got["left_score"])
 	}
-	if creditsOf(nil)["credits"] != 0.0 {
-		t.Errorf("访客账号应为 0 且不报错")
+	if _, has := got["credits"]; has {
+		t.Errorf("不应再输出折算后的 credits")
+	}
+	if v, ok := creditsOf(nil)["left_score"]; !ok || v != nil {
+		t.Errorf("访客账号应返回 nil 余额且不报错")
 	}
 }
 

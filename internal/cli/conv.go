@@ -11,8 +11,8 @@ import (
 
 // convUsage 同时用于 help 与 schema，避免两处漂移。
 const convUsage = `conv 子命令（会话增删改查；「增」由 chat 不带 --cid 时服务端懒创建完成）:
-  list                [--page N --size N --all] [--agent main|drawing] [--grep 关键词]
-  show       CID      [--scan N]                    元数据 + 上游自动标题
+  list                [--agent main|drawing] [--grep 关键词]     完整列表（内部自动翻页）
+  show       CID                                   元数据 + 上游自动标题
   history    CID      [--agent A] [--raw]           逐条输出 user/text/reasoning/images
   rename     CID TITLE|--title T|--title-file P     改标题
   title      CID                                   只读自动标题
@@ -72,47 +72,22 @@ func mustCID(args []string, i int, what string) (string, error) {
 	return id, nil
 }
 
-// convList 逐页取会话：每条一个 item 事件，末尾 done 带 count。
+// convList 一次性取全部会话（V14：库层 ConvListAll 内部翻页）：每条一个 item 事件，末尾 done 带 count。
 func convList(a *App, agent string) error {
-	const maxPage = 1000 // 防御上限：has_more 异常时不至于死循环
-	f := a.f
-	page, n := f.Page, 0
-	for {
-		body, err := a.pageConvList(page, f.Size)
-		if err != nil {
-			return err
-		}
-		for _, raw := range body.List {
-			if !matchConv(raw, agent, f.Grep) {
-				continue
-			}
-			n++
-			a.ev(&glm.Event{Type: "item", Cmd: "conv.list", Data: raw})
-		}
-		if !f.All || !body.HasMore || page >= maxPage {
-			a.ev(&glm.Event{Type: "done", Cmd: "conv.list", Count: n, Frames: page,
-				Finished: true, HasMore: body.HasMore})
-			return nil
-		}
-		page++
-	}
-}
-
-func (a *App) pageConvList(page, size int) (*convPage, error) {
-	res, err := a.c.ConvList(page, size)
+	all, err := a.c.ConvListAll()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var body convPage
-	if err := json.Unmarshal(res, &body); err != nil {
-		return nil, glm.NewErr(glm.CUpstream, "recent_list 响应结构异常: %v", err)
+	n := 0
+	for _, raw := range all {
+		if !matchConv(raw, agent, a.f.Grep) {
+			continue
+		}
+		n++
+		a.ev(&glm.Event{Type: "item", Cmd: "conv.list", Data: raw})
 	}
-	return &body, nil
-}
-
-type convPage struct {
-	HasMore bool              `json:"has_more"`
-	List    []json.RawMessage `json:"conversation_list"`
+	a.ev(&glm.Event{Type: "done", Cmd: "conv.list", Count: n, Finished: true})
+	return nil
 }
 
 func matchConv(raw json.RawMessage, agent, grep string) bool {
@@ -130,28 +105,21 @@ func matchConv(raw json.RawMessage, agent, grep string) bool {
 	return true
 }
 
-// convShow 汇总单个会话：recent_list 元数据 + conversation/title（不假设 list 元素字段）。
+// convShow 汇总单个会话：全量会话列表中的元数据 + conversation/title（不假设 list 元素字段）。
 func convShow(a *App, rest []string, agent string) error {
 	cid, err := mustCID(rest, 0, "conv show")
 	if err != nil {
 		return err
 	}
-	f := a.f
-	size := f.Size
 	var meta map[string]any
-	for p := 1; p <= f.Scan; p++ {
-		body, err := a.pageConvList(p, size)
-		if err != nil {
-			return err
-		}
-		for _, raw := range body.List {
-			var m map[string]any
-			if json.Unmarshal(raw, &m) == nil && fmt.Sprint(m["conversation_id"]) == cid {
-				meta = m
-				break
-			}
-		}
-		if meta != nil || !body.HasMore {
+	all, err := a.c.ConvListAll() // V14：内部翻页拿全量后再定位，调用方不指定页码
+	if err != nil {
+		return err
+	}
+	for _, raw := range all {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil && fmt.Sprint(m["conversation_id"]) == cid {
+			meta = m
 			break
 		}
 	}

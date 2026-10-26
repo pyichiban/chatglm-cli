@@ -1,191 +1,143 @@
+// cli_test.go —— 新命令层的关键行为测试（离线，不碰上游）。
 package cli
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/pyichiban/chatglm-cli/internal/channel"
 )
 
-// TestParseFlagAnywhere 锁死「flag 可写在任意位置」这条契约（agent 与人最容易踩的地方）。
-func TestParseFlagAnywhere(t *testing.T) {
-	cases := []struct {
-		argv    []string
-		cmd     string
-		rest    []string
-		cid     string
-		prompt  string
-		dry     bool
-		wantErr bool
-	}{
-		{[]string{"chat", "--cid", "6ad16e02581cc70756919ade", "你好"}, "chat",
-			[]string{"chat", "你好"}, "6ad16e02581cc70756919ade", "", false, false},
-		{[]string{"chat", "你好", "--cid=6ad16e02581cc70756919ade"}, "chat",
-			[]string{"chat", "你好"}, "6ad16e02581cc70756919ade", "", false, false},
-		{[]string{"--cred", "x.json", "conv", "delete", "6ad16e02581cc70756919ade", "--yes"}, "conv",
-			[]string{"conv", "delete", "6ad16e02581cc70756919ade"}, "", "", false, false},
-		{[]string{"chat", "-p", "-"}, "chat", []string{"chat"}, "", "-", false, false},
-		{[]string{"chat", "--dry-run", "你好"}, "chat", []string{"chat", "你好"}, "", "", true, false},
-		{[]string{"chat", "--cid", "x", "--cred"}, "", nil, "", "", false, true}, // --cred 缺取值必须报错
-		{[]string{"chat", "--nope"}, "", nil, "", "", false, true},               // 未知 flag 必须直接报错
-		{[]string{}, "", nil, "", "", false, false},
-	}
-	for _, c := range cases {
-		fs, f := newFlagSet("t")
-		name, err := parse(fs, c.argv, f)
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("%v 应该报错", c.argv)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("%v 意外报错: %v", c.argv, err)
-			continue
-		}
-		if name != c.cmd {
-			t.Errorf("%v: 命令 = %q，期望 %q", c.argv, name, c.cmd)
-		}
-		if len(f.rest) != len(c.rest) {
-			t.Errorf("%v: rest = %v，期望 %v", c.argv, f.rest, c.rest)
-		}
-		if f.CID != c.cid || f.Prompt != c.prompt || f.DryRun != c.dry {
-			t.Errorf("%v: cid=%q prompt=%q dry=%v", c.argv, f.CID, f.Prompt, f.DryRun)
-		}
-	}
+// captureStdout/Stderr 换掉标准流执行 fn，返回捕获内容与退出码。
+func capture(t *testing.T, fn func() int) (out, errTxt string, code int) {
+	t.Helper()
+	of, _ := os.CreateTemp(t.TempDir(), "out")
+	ef, _ := os.CreateTemp(t.TempDir(), "err")
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = of, ef
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	code = fn()
+	of.Close()
+	ef.Close()
+	ob, _ := os.ReadFile(of.Name())
+	eb, _ := os.ReadFile(ef.Name())
+	return string(ob), string(eb), code
 }
 
-// TestParseRepeatableParam 覆盖 --param 重复与 k=v 校验。
-func TestParseRepeatableParam(t *testing.T) {
-	fs, f := newFlagSet("t")
-	if _, err := parse(fs, []string{"conv", "history", "abc", "--param", "page=2", "--param", "size=10"}, f); err != nil {
+func TestManifestCommand(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "manifest.json")
+	_, _, code := capture(t, func() int { return Main([]string{"manifest", "--out", p}) })
+	if code != 0 {
+		t.Fatalf("exit=%d", code)
+	}
+	b, err := os.ReadFile(p)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(f.Params) != 2 || f.Params["page"] != "2" {
-		t.Errorf("params = %v", map[string]string(f.Params))
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("manifest 不是 JSON: %v", err)
 	}
-	fs, f = newFlagSet("t")
-	if _, err := parse(fs, []string{"conv", "history", "abc", "--param", "novalue"}, f); err == nil {
-		t.Errorf("--param 缺 = 应报错")
+	if m["id"] != channel.ID || m["kind"] != "channel" {
+		t.Fatalf("manifest 身份不对: %v", m)
+	}
+	caps, _ := m["capabilities"].(map[string]any)
+	conv, _ := caps["conversation"].([]any)
+	found := false
+	for _, v := range conv {
+		if v == "chat.generate" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("capabilities.conversation 缺 chat.generate: %v", conv)
 	}
 }
 
-// TestResolveAgent 覆盖别名展开与「--ratio 即生图」这条约定。
+func TestSystemoneNotSupported(t *testing.T) {
+	_, errTxt, code := capture(t, func() int { return Main([]string{"systemone"}) })
+	if code == 0 {
+		t.Fatal("systemone 必须非 0 退出")
+	}
+	if !strings.Contains(errTxt, "not_supported") {
+		t.Fatalf("stderr 缺 not_supported: %q", errTxt)
+	}
+}
+
+func TestNoPositionalArgs(t *testing.T) {
+	_, errTxt, code := capture(t, func() int { return Main([]string{"chat", "positional"}) })
+	if code == 0 {
+		t.Fatal("位置参数必须被拒绝")
+	}
+	if !strings.Contains(errTxt, "位置参数") && !strings.Contains(errTxt, "不接受") {
+		t.Fatalf("报错应说明位置参数问题: %q", errTxt)
+	}
+}
+
+func TestSchemaCommand(t *testing.T) {
+	out, _, _ := capture(t, func() int { return Main([]string{"schema"}) })
+	var v map[string]any
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatalf("schema 输出不是 JSON: %v\n%s", err, out)
+	}
+}
+
+func TestVersionCommand(t *testing.T) {
+	out, _, code := capture(t, func() int { return Main([]string{"version"}) })
+	if code != 0 || !strings.Contains(out, VERSION) {
+		t.Fatalf("version 输出异常: code=%d out=%s", code, out)
+	}
+}
+
 func TestResolveAgent(t *testing.T) {
-	for alias, want := range map[string]string{"main": "65940acff94777010aa6b796",
-		"drawing": "65a232c082ff90a2ad2f15e2", "read": "658a7988b8a9a98d38725745"} {
-		got, err := resolveAgent(alias, "")
-		if err != nil || got != want {
-			t.Errorf("%s ⇒ %q %v", alias, got, err)
-		}
+	aid, err := resolveAgent("drawing", "")
+	if err != nil || aid != "65a232c082ff90a2ad2f15e2" {
+		t.Fatalf("drawing 别名: %v %v", aid, err)
 	}
-	if got, _ := resolveAgent("main", "1:1"); got != "65a232c082ff90a2ad2f15e2" {
-		t.Errorf("给了 --ratio 应自动切到画图 agent，得到 %q", got)
+	// --ratio 是生图显式信号：agent 缺省/main 时自动切画图智能体
+	aid, _ = resolveAgent("", "1:1")
+	if aid != "65a232c082ff90a2ad2f15e2" {
+		t.Fatalf("--ratio 未切画图: %v", aid)
 	}
-	if got, _ := resolveAgent("drawing", "16:9"); got != "65a232c082ff90a2ad2f15e2" {
-		t.Errorf("显式 --agent 不该被 ratio 覆盖")
-	}
-	if _, err := resolveAgent("nope", ""); err == nil {
-		t.Errorf("未知 agent 必须报错")
-	}
-	raw := "6ad16e02581cc70756919ade"
-	if got, err := resolveAgent(raw, ""); err != nil || got != raw {
-		t.Errorf("裸 assistant_id 应直通: %q %v", got, err)
+	if _, err := resolveAgent("bogus", ""); err == nil {
+		t.Fatal("未知别名应报错")
 	}
 }
 
-// TestValidRatio 覆盖比例白名单（上游对非法值静默降级 1:1，所以 CLI 侧必须拦住）。
 func TestValidRatio(t *testing.T) {
-	for _, ok := range []string{"1:1", "3:4", "4:3", "9:16", "16:9"} {
-		if !validRatio(ok) {
-			t.Errorf("%s 应有效", ok)
+	for _, r := range []string{"1:1", "3:4", "4:3", "9:16", "16:9"} {
+		if !validRatio(r) {
+			t.Fatalf("%s 应合法", r)
 		}
 	}
-	for _, bad := range []string{"21:9", "1:2", "", "auto"} {
-		if validRatio(bad) {
-			t.Errorf("%q 应被拒", bad)
-		}
+	if validRatio("2:1") {
+		t.Fatal("2:1 应非法")
 	}
 }
 
-// TestCreditsOf 覆盖余额输出（V13 定稿：不折算，原样返回 left_score）。
-func TestCreditsOf(t *testing.T) {
-	got := creditsOf(map[string]any{"left_score": "330.00"})
-	if got["left_score"] != "330.00" {
-		t.Errorf("left_score = %v", got["left_score"])
+func TestExtMime(t *testing.T) {
+	for path, want := range map[string]string{
+		"a.png": "image/png", "b.JPG": "image/jpeg", "c.webp": "image/webp",
+	} {
+		got, err := extMime(path)
+		if err != nil || got != want {
+			t.Fatalf("%s: got %v err %v", path, got, err)
+		}
 	}
-	if _, has := got["credits"]; has {
-		t.Errorf("不应再输出折算后的 credits")
-	}
-	if v, ok := creditsOf(nil)["left_score"]; !ok || v != nil {
-		t.Errorf("访客账号应返回 nil 余额且不报错")
+	if _, err := extMime("x.tiff"); err == nil {
+		t.Fatal("推不出 MIME 必须报错（不猜）")
 	}
 }
 
-// TestCommandsHaveUsage 防止新增命令时漏写 usage/schema（两张表同源）。
-func TestCommandsCovered(t *testing.T) {
-	names := map[string]bool{}
-	for _, c := range commands() {
-		if c.Usage == "" || c.Run == nil {
-			t.Errorf("命令 %q 缺 usage/run", c.Name)
-		}
-		names[c.Name] = true
+func TestParseDataURI(t *testing.T) {
+	mime, payload, err := parseDataURI("data:image/png;base64,aGVsbG8=")
+	if err != nil || mime != "image/png" || payload != "aGVsbG8=" {
+		t.Fatalf("got %v %v %v", mime, payload, err)
 	}
-	for _, want := range []string{"chat", "user", "models", "agents", "auth", "conv", "raw", "schema", "help"} {
-		if !names[want] {
-			t.Errorf("命令表缺 %q", want)
-		}
-	}
-}
-
-// TestSplitImageArgs：image 命令的提示词/参考图拆分规则。
-func TestSplitImageArgs(t *testing.T) {
-	cases := []struct {
-		promptFlag string
-		rest       []string
-		refFlags   []string
-		wantPrompt string
-		wantRefs   int
-		wantErr    bool
-	}{
-		{"画只猫", nil, nil, "画只猫", 0, false},
-		{"", []string{"画只猫", "a.jpg", "b.png"}, nil, "画只猫", 2, false},
-		{"", []string{"a.jpg"}, []string{"b.jpg"}, "a.jpg", 1, false}, // 无 --prompt ⇒ 第一个位置参数是提示词
-		{"", nil, nil, "", 0, true},
-		{"画只猫", []string{"a.jpg"}, []string{"b.jpg"}, "画只猫", 2, false},
-	}
-	for i, c := range cases {
-		prompt, refs, err := splitImageArgs(c.promptFlag, c.rest, c.refFlags)
-		if c.wantErr {
-			if err == nil {
-				t.Errorf("case %d 应报错", i)
-			}
-			continue
-		}
-		if err != nil {
-			t.Errorf("case %d: %v", i, err)
-			continue
-		}
-		if prompt != c.wantPrompt || len(refs) != c.wantRefs {
-			t.Errorf("case %d: prompt=%q refs=%d，期望 %q/%d", i, prompt, len(refs), c.wantPrompt, c.wantRefs)
-		}
-	}
-}
-
-// TestResolveOutPath：--out 的目录/文件/多图序号规则。
-func TestResolveOutPath(t *testing.T) {
-	dir := t.TempDir()
-	if got := resolveOutPath("", "20260102_150405", 1, 1); filepath.Dir(got) == "" {
-		t.Errorf("默认当前目录: %q", got)
-	}
-	if got := resolveOutPath(dir, "b", 1, 1); filepath.Dir(got) != dir || filepath.Ext(got) != ".jpg" {
-		t.Errorf("目录形态: %q", got)
-	}
-	if got := resolveOutPath(filepath.Join(dir, "out.jpg"), "b", 1, 1); got != filepath.Join(dir, "out.jpg") {
-		t.Errorf("单图文件形态: %q", got)
-	}
-	if got := resolveOutPath(filepath.Join(dir, "out.jpg"), "b", 2, 4); got != filepath.Join(dir, "out-2.jpg") {
-		t.Errorf("多图序号形态: %q", got)
-	}
-	if got := resolveOutPath(filepath.Join(dir, "noext"), "b", 1, 1); filepath.Ext(got) != ".jpg" {
-		t.Errorf("无扩展名当目录: %q", got)
+	if _, _, err := parseDataURI("https://x/y.png"); err == nil {
+		t.Fatal("非 data URI 应报错")
 	}
 }

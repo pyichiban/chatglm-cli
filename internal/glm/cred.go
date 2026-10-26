@@ -20,9 +20,13 @@ type Credential struct {
 	UserID       string            `json:"user_id"`
 	ExtraCookies map[string]string `json:"extra_cookies,omitempty"`
 
-	Source  string                     `json:"-"` // 文件路径；"env" 表示来源环境变量（不可落盘）
-	origin  string                     // 本次刷新所依据的 refresh（写盘前做乐观比对）
-	unknown map[string]json.RawMessage // 保留文件里本工具不认识的键，避免覆盖 Python 侧数据
+	Source string `json:"-"` // 文件路径；"env" 表示来源环境变量（不可落盘）
+	origin string // 本次刷新所依据的 refresh（写盘前做乐观比对）
+	// saveFn 非空时接管落盘（ww3 authstore 嵌套形由 channel 层注入），空则按旧扁平形写。
+	saveFn      func(*Credential) error
+	nickname    string                     // ww3 authstore 冗余昵称（随轮换写回）
+	w3ExpiresAt int64                      // ww3 authstore 的显式 expiresAt（Unix 秒，0=用 JWT）
+	unknown     map[string]json.RawMessage // 保留文件里本工具不认识的键，避免覆盖 Python 侧数据
 }
 
 // JWTPayload 只 base64 解 JWT 的 payload，**不验签、不校验**；失败返回 nil（调用方据此判「这不是 JWT」）。
@@ -271,6 +275,9 @@ func parseCredBytes(raw []byte) (*Credential, error) {
 // ⚠️ refresh_token 每次刷新都会轮换 [实证 PROTOCOL §1.3 铁律 1]：**必须落盘**，
 // 否则下次启动拿旧值 → 账号失效。落盘失败必须显式报错，不允许静默吞掉。
 func (c *Credential) Save() error {
+	if c.saveFn != nil { // ww3 authstore 模式：嵌套形落盘由 channel 层实现
+		return c.saveFn(c)
+	}
 	if c.Source == "" || c.Source == "env" {
 		return nil // 环境变量模式无法落盘（调用方负责提示）
 	}
